@@ -82,6 +82,25 @@ async def handle_photo_upload(message: Message, state: FSMContext):
     await message.bot.download_file(file_info.file_path, file_path)
     logger.info(f"User {user_id} uploaded photo, saved to {file_path}")
 
+    # Check if face is detected in photo
+    import cv2
+    img = cv2.imread(str(file_path))
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+
+    if len(faces) == 0:
+        await message.answer(
+            "❌ К сожалению, на вашем фото не обнаружено лицо.\n\n"
+            "Пожалуйста, отправьте фото где:\n"
+            "• Видно ваше лицо\n"
+            "• Вы смотрите в камеру\n"
+            "• Хорошее освещение\n"
+            "• Вы один в кадре"
+        )
+        file_path.unlink()  # Delete invalid photo
+        return
+
     # Save photo info to database
     async with async_session_maker() as session:
         await UserPhotoCRUD.add_photo(
