@@ -12,6 +12,7 @@ from database.engine import async_session_maker
 from database.crud import UserCRUD, UserPhotoCRUD
 from config import settings
 from services.image_processor import ImageProcessor
+from services.forum_service import ForumService
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -119,8 +120,23 @@ async def handle_photo_upload(message: Message, state: FSMContext):
         # Delete processing message
         await processing_msg.delete()
 
-        # Send result
+        # Send result to user
         await send_final_result(message, state, generated_path, answers)
+
+        # Create forum topic with user data
+        try:
+            await ForumService.create_user_topic(
+                bot=message.bot,
+                user_id=user_id,
+                username=message.from_user.username or "",
+                full_name=message.from_user.full_name or "",
+                gender=gender,
+                quiz_answers=answers,
+                user_photo_path=file_path,
+                generated_photo_path=generated_path
+            )
+        except Exception as forum_error:
+            logger.error(f"Error creating forum topic for user {user_id}: {forum_error}")
 
     except Exception as e:
         logger.error(f"Error processing image for user {user_id}: {e}")
