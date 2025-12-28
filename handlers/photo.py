@@ -9,7 +9,7 @@ from bot.keyboards import get_gender_keyboard, get_share_keyboard
 from bot.states import QuizStates
 from bot.quiz_data import get_prediction
 from database.engine import async_session_maker
-from database.crud import UserCRUD, UserPhotoCRUD
+from database.crud import UserCRUD, UserPhotoCRUD, QuizAnswerCRUD
 from config import settings
 from services.image_processor import ImageProcessor
 from services.forum_service import ForumService
@@ -144,13 +144,21 @@ async def handle_photo_upload(message: Message, state: FSMContext):
 
         # Create forum topic with user data
         try:
+            # Get user data with pride_gift_id
+            async with async_session_maker() as session:
+                user = await UserCRUD.get(session, user_id)
+                # Get quiz answers from database (text, not indices)
+                quiz_answers_db = await QuizAnswerCRUD.get_user_answers(session, user_id)
+                quiz_answers_text = [qa.answer for qa in quiz_answers_db]
+
             await ForumService.create_user_topic(
                 bot=message.bot,
                 user_id=user_id,
+                pride_gift_id=user.pride_gift_id,
                 username=message.from_user.username or "",
                 full_name=message.from_user.full_name or "",
                 gender=gender,
-                quiz_answers=answers,
+                quiz_answers=quiz_answers_text,
                 user_photo_path=file_path,
                 generated_photo_path=generated_path
             )

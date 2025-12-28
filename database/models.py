@@ -14,6 +14,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    pride_gift_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)  # Unique 5-digit ID
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

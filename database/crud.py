@@ -1,5 +1,6 @@
 """CRUD operations for database."""
 from typing import List, Optional
+import random
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import User, QuizAnswer, UserPhoto, QuizQuestion
@@ -9,13 +10,33 @@ class UserCRUD:
     """CRUD operations for User model."""
 
     @staticmethod
+    async def _generate_unique_pride_id(session: AsyncSession) -> int:
+        """Generate unique 5-digit Pride GIFT ID."""
+        max_attempts = 100
+        for _ in range(max_attempts):
+            pride_id = random.randint(10000, 99999)
+            # Check if this ID already exists
+            result = await session.execute(
+                select(User).where(User.pride_gift_id == pride_id)
+            )
+            if not result.scalar_one_or_none():
+                return pride_id
+        raise ValueError("Could not generate unique Pride GIFT ID")
+
+    @staticmethod
     async def get_or_create(session: AsyncSession, user_id: int, username: str = None, full_name: str = None) -> User:
         """Get existing user or create new one."""
         result = await session.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
 
         if not user:
-            user = User(id=user_id, username=username, full_name=full_name)
+            pride_gift_id = await UserCRUD._generate_unique_pride_id(session)
+            user = User(
+                id=user_id,
+                pride_gift_id=pride_gift_id,
+                username=username,
+                full_name=full_name
+            )
             session.add(user)
             await session.commit()
             await session.refresh(user)
