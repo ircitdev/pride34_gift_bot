@@ -144,19 +144,20 @@ class TemplateGenerator:
         """
         Detect where to place face on template.
 
-        Based on your template dimensions (looks like small figurine ~300x400px)
-        Head is in the upper portion, centered
+        Точная замена головы на 3D-фигурке (как у конкурента)
+        Голова должна быть КРУГЛОЙ, не вытянутой!
         """
         h, w = template.shape[:2]
 
-        # For your specific templates (765x1024 px)
-        # Head of figurine needs to cover face area properly
-        head_width = int(w * 0.24)  # Wider for full face coverage
-        head_height = int(w * 0.28)  # Taller to cover full head
+        # Голова КРУГЛАЯ - ширина ≈ высоте
+        # Размер ~17% от ширины шаблона для обоих измерений
+        head_size = int(w * 0.17)  # 17% ширины (на 765px = ~130px)
+        head_width = head_size
+        head_height = head_size  # Квадрат для круглой головы!
 
-        # Position - centered on head
-        x = (w - head_width) // 2  # Centered horizontally
-        y = int(h * 0.12)  # Higher position to cover full head (12% from top)
+        # Position - центр по горизонтали, 11% от верха (чтобы совпала с шеей)
+        x = (w - head_width) // 2  # Центр по горизонтали
+        y = int(h * 0.11)  # 11% от верха - ниже для лучшего совпадения с шеей
 
         logger.info(f"Template size: {w}x{h}, Face region: x={x}, y={y}, w={head_width}, h={head_height}")
 
