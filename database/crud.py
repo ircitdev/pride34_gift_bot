@@ -82,6 +82,12 @@ class UserCRUD:
         await session.commit()
 
     @staticmethod
+    async def get_all_users(session: AsyncSession) -> List[User]:
+        """Get all users."""
+        result = await session.execute(select(User))
+        return list(result.scalars().all())
+
+    @staticmethod
     async def get_all_participants(session: AsyncSession) -> List[User]:
         """Get all users who completed quiz."""
         result = await session.execute(
@@ -97,19 +103,6 @@ class UserCRUD:
         )
         return list(result.scalars().all())
 
-    @staticmethod
-    async def get_all_users(session: AsyncSession) -> List[User]:
-        """Get all users (for broadcast)."""
-        result = await session.execute(select(User))
-        return list(result.scalars().all())
-
-    @staticmethod
-    async def update_forum_topic_id(session: AsyncSession, user_id: int, topic_id: int):
-        """Update forum topic ID for user."""
-        await session.execute(
-            update(User).where(User.id == user_id).values(forum_topic_id=topic_id)
-        )
-        await session.commit()
 
 
 class QuizAnswerCRUD:

@@ -2,10 +2,11 @@
 import logging
 import asyncio
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database.engine import async_session_maker
 from database.crud import UserCRUD
@@ -18,14 +19,17 @@ logger = logging.getLogger(__name__)
 class BroadcastStates(StatesGroup):
     """States for broadcast."""
     waiting_for_message = State()
+    confirming = State()
 
 
 def is_admin(user_id: int) -> bool:
     """Check if user is admin."""
-    return user_id in settings.ADMIN_IDS
+    admin_ids = [int(x.strip()) for x in settings.ADMIN_IDS.split(',') if x.strip()]
+    return user_id in admin_ids
 
 
 @router.message(Command("broadcast"))
+@router.message(Command("mailing"))
 async def cmd_broadcast(message: Message, state: FSMContext):
     """Start broadcast process - admin only."""
     if not is_admin(message.from_user.id):
@@ -38,13 +42,15 @@ async def cmd_broadcast(message: Message, state: FSMContext):
         "Поддерживается:\n"
         "• Текст с форматированием (HTML)\n"
         "• Фото с подписью\n"
-        "• Видео с подписью\n\n"
+        "• Видео с подписью\n"
+        "• Документы\n\n"
         "Для отмены используйте /cancel"
     )
     await state.set_state(BroadcastStates.waiting_for_message)
 
 
 @router.message(BroadcastStates.waiting_for_message, Command("cancel"))
+@router.message(BroadcastStates.confirming, Command("cancel"))
 async def cancel_broadcast(message: Message, state: FSMContext):
     """Cancel broadcast."""
     await state.clear()
@@ -53,13 +59,13 @@ async def cancel_broadcast(message: Message, state: FSMContext):
 
 @router.message(BroadcastStates.waiting_for_message)
 async def handle_broadcast_message(message: Message, state: FSMContext):
-    """Handle broadcast message and send to all users."""
+    """Handle broadcast message and ask for confirmation."""
     if not is_admin(message.from_user.id):
         await message.answer("❌ Эта команда доступна только администраторам")
         await state.clear()
         return
 
-    # Get all users
+    # Get all users count
     async with async_session_maker() as session:
         users = await UserCRUD.get_all_users(session)
 
@@ -70,83 +76,91 @@ async def handle_broadcast_message(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # Confirm broadcast
+    # Save message data to state
+    await state.update_data(message_to_broadcast=message)
+
+    # Create confirmation keyboard
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Начать рассылку", callback_data="broadcast_confirm")
+    builder.button(text="❌ Отмена", callback_data="broadcast_cancel")
+    builder.adjust(1)
+
     confirm_text = (
         f"📊 <b>Подтверждение рассылки</b>\n\n"
-        f"Получателей: {total_users}\n\n"
-        f"Начать рассылку? Отправьте <b>ДА</b> для подтверждения\n"
-        f"Или /cancel для отмены"
+        f"👥 Получателей: {total_users}\n\n"
+        f"Подтвердите начало рассылки:"
     )
 
-    await message.answer(confirm_text)
-
-    # Store message data
-    await state.update_data(
-        message_id=message.message_id,
-        users=users,
-        total=total_users
-    )
+    await message.answer(confirm_text, reply_markup=builder.as_markup())
+    await state.set_state(BroadcastStates.confirming)
 
 
-@router.message(BroadcastStates.waiting_for_message, F.text == "ДА")
-async def confirm_and_send_broadcast(message: Message, state: FSMContext):
+@router.callback_query(F.data == "broadcast_cancel")
+async def cancel_broadcast_callback(callback: CallbackQuery, state: FSMContext):
+    """Cancel broadcast via callback."""
+    await callback.answer()
+    await callback.message.edit_text("❌ Рассылка отменена")
+    await state.clear()
+
+
+@router.callback_query(F.data == "broadcast_confirm")
+async def confirm_and_send_broadcast(callback: CallbackQuery, state: FSMContext):
     """Confirm and send broadcast to all users."""
-    if not is_admin(message.from_user.id):
+    await callback.answer()
+
+    if not is_admin(callback.from_user.id):
         await state.clear()
         return
 
     data = await state.get_data()
-    users = data.get("users", [])
-    total = data.get("total", 0)
-    source_msg_id = data.get("message_id")
+    source_msg = data.get("message_to_broadcast")
 
-    if not users:
-        await message.answer("❌ Нет данных для рассылки")
+    if not source_msg:
+        await callback.message.edit_text("❌ Сообщение для рассылки не найдено")
         await state.clear()
         return
 
-    # Start broadcasting
-    status_msg = await message.answer(
+    # Get all users
+    async with async_session_maker() as session:
+        users = await UserCRUD.get_all_users(session)
+
+    total = len(users)
+
+    # Update message
+    await callback.message.edit_text(
         f"🚀 Начинаю рассылку...\n\n"
         f"Отправлено: 0/{total}"
     )
 
-    # Get source message
-    source_msg = None
-    async for msg in message.bot.iter_history(message.chat.id, limit=10):
-        if msg.message_id == source_msg_id:
-            source_msg = msg
-            break
-
-    if not source_msg:
-        await message.answer("❌ Исходное сообщение не найдено")
-        await state.clear()
-        return
-
     # Send messages
     success_count = 0
     failed_count = 0
+    failed_users = []
 
     for i, user in enumerate(users, 1):
         try:
             # Copy message to user
-            await source_msg.copy_to(user.telegram_id)
+            await source_msg.copy_to(user.id)
             success_count += 1
 
-            # Update status every 10 users
-            if i % 10 == 0:
-                await status_msg.edit_text(
-                    f"🚀 Рассылка в процессе...\n\n"
-                    f"Отправлено: {success_count}/{total}\n"
-                    f"Ошибок: {failed_count}"
-                )
+            # Update status every 5 users
+            if i % 5 == 0 or i == total:
+                try:
+                    await callback.message.edit_text(
+                        f"🚀 Рассылка в процессе...\n\n"
+                        f"Отправлено: {success_count}/{total}\n"
+                        f"Ошибок: {failed_count}"
+                    )
+                except:
+                    pass  # Ignore edit errors
 
-            # Sleep to avoid rate limits
-            await asyncio.sleep(0.05)
+            # Sleep to avoid rate limits (30 messages per second max)
+            await asyncio.sleep(0.04)
 
         except Exception as e:
-            logger.error(f"Failed to send message to user {user.telegram_id}: {e}")
+            logger.error(f"Failed to send message to user {user.id}: {e}")
             failed_count += 1
+            failed_users.append(user.id)
 
     # Final report
     final_text = (
@@ -155,14 +169,17 @@ async def confirm_and_send_broadcast(message: Message, state: FSMContext):
         f"• Всего пользователей: {total}\n"
         f"• Успешно отправлено: {success_count}\n"
         f"• Ошибок: {failed_count}\n"
-        f"• Процент доставки: {(success_count/total*100):.1f}%"
+        f"• Процент доставки: {(success_count/total*100 if total > 0 else 0):.1f}%"
     )
 
-    await status_msg.edit_text(final_text)
+    if failed_count > 0 and failed_count <= 10:
+        final_text += f"\n\n❌ Не доставлено: {', '.join(map(str, failed_users))}"
+
+    await callback.message.edit_text(final_text)
     await state.clear()
 
     logger.info(
-        f"Broadcast completed by admin {message.from_user.id}: "
+        f"Broadcast completed by admin {callback.from_user.id}: "
         f"{success_count} sent, {failed_count} failed"
     )
 
@@ -175,16 +192,22 @@ async def cmd_stats(message: Message):
         return
 
     async with async_session_maker() as session:
-        users = await UserCRUD.get_all_users(session)
-        quiz_completed = sum(1 for u in users if u.quiz_completed)
-        photos_uploaded = sum(1 for u in users if u.photo_uploaded)
+        all_users = await UserCRUD.get_all_users(session)
+        participants = await UserCRUD.get_all_participants(session)
+        winners = await UserCRUD.get_winners(session)
+
+    total = len(all_users)
+    quiz_completed = len(participants)
+    photos_uploaded = sum(1 for u in all_users if u.photo_uploaded)
+    winner_count = len(winners)
 
     stats_text = (
         f"📊 <b>Статистика бота</b>\n\n"
-        f"👥 Всего пользователей: {len(users)}\n"
+        f"👥 Всего пользователей: {total}\n"
         f"✅ Завершили квиз: {quiz_completed}\n"
         f"📸 Загрузили фото: {photos_uploaded}\n"
-        f"🎯 Конверсия: {(quiz_completed/len(users)*100 if users else 0):.1f}%"
+        f"🏆 Победителей: {winner_count}\n"
+        f"🎯 Конверсия: {(quiz_completed/total*100 if total > 0 else 0):.1f}%"
     )
 
     await message.answer(stats_text)
