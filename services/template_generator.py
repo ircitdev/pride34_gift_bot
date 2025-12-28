@@ -121,12 +121,14 @@ class TemplateGenerator:
         # Get largest face
         x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
 
-        # Add padding
-        padding = int(w * 0.3)
-        x = max(0, x - padding)
-        y = max(0, y - padding)
-        w = min(img.shape[1] - x, w + 2 * padding)
-        h = min(img.shape[0] - y, h + 2 * padding)
+        # Add MORE padding for better face framing (includes hair and neck)
+        padding_w = int(w * 0.5)  # 50% horizontal padding
+        padding_h = int(h * 0.6)  # 60% vertical padding for hair/neck
+
+        x = max(0, x - padding_w)
+        y = max(0, y - padding_h)
+        w = min(img.shape[1] - x, w + 2 * padding_w)
+        h = min(img.shape[0] - y, h + 2 * padding_h)
 
         return img[y:y+h, x:x+w]
 
@@ -148,13 +150,13 @@ class TemplateGenerator:
         h, w = template.shape[:2]
 
         # For your specific templates (765x1024 px)
-        # Head of figurine is small, need precise positioning
-        head_width = int(w * 0.20)  # Smaller - just the head
-        head_height = int(w * 0.23)  # Slightly taller for face proportions
+        # Head of figurine needs to cover face area properly
+        head_width = int(w * 0.24)  # Wider for full face coverage
+        head_height = int(w * 0.28)  # Taller to cover full head
 
-        # Position - head is below the ornament hook
+        # Position - centered on head
         x = (w - head_width) // 2  # Centered horizontally
-        y = int(h * 0.14)  # Lower - skip the ornament hook area (14% from top)
+        y = int(h * 0.12)  # Higher position to cover full head (12% from top)
 
         logger.info(f"Template size: {w}x{h}, Face region: x={x}, y={y}, w={head_width}, h={head_height}")
 
@@ -174,13 +176,22 @@ class TemplateGenerator:
         # Resize user face to template head size
         face_resized = cv2.resize(user_face, (w, h), interpolation=cv2.INTER_LANCZOS4)
 
-        # Color matching - match scene lighting (lighter adjustment)
+        # Color matching - match scene lighting
         template_roi = template[y:y+h, x:x+w].copy()
         face_matched = self._match_colors(face_resized, template_roi)
 
-        # Simple direct replacement for maximum clarity
+        # Create soft blending mask for natural edges
+        mask = np.zeros((h, w), dtype=np.float32)
+        center = (w // 2, h // 2)
+        axes = (int(w * 0.45), int(h * 0.45))
+        cv2.ellipse(mask, center, axes, 0, 0, 360, 1, -1)
+        mask = cv2.GaussianBlur(mask, (31, 31), 15)
+        mask_3ch = cv2.merge([mask, mask, mask])
+
+        # Blend with soft edges
         result = template.copy()
-        result[y:y+h, x:x+w] = face_matched
+        blended = (face_matched * mask_3ch + template_roi * (1 - mask_3ch)).astype(np.uint8)
+        result[y:y+h, x:x+w] = blended
 
         return result
 

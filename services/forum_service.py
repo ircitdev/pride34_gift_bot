@@ -43,8 +43,14 @@ class ForumService:
             return 0
 
         try:
-            # Create topic with user's Telegram ID as name
-            topic_name = f"User {user_id}"
+            # Create topic with user's name (full_name or username)
+            if full_name and full_name.strip():
+                topic_name = full_name[:100]  # Telegram limit is 128 chars
+            elif username:
+                topic_name = f"@{username}"
+            else:
+                topic_name = f"User {user_id}"
+
             topic_message = await bot.create_forum_topic(
                 chat_id=settings.FORUM_GROUP_ID,
                 name=topic_name
