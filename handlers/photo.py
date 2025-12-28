@@ -151,7 +151,8 @@ async def handle_photo_upload(message: Message, state: FSMContext):
                 quiz_answers_db = await QuizAnswerCRUD.get_user_answers(session, user_id)
                 quiz_answers_text = [qa.answer for qa in quiz_answers_db]
 
-            await ForumService.create_user_topic(
+            # Create topic and STORE topic_id
+            topic_id = await ForumService.create_user_topic(
                 bot=message.bot,
                 user_id=user_id,
                 pride_gift_id=user.pride_gift_id,
@@ -162,6 +163,13 @@ async def handle_photo_upload(message: Message, state: FSMContext):
                 user_photo_path=file_path,
                 generated_photo_path=generated_path
             )
+
+            # ✨ НОВОЕ: Сохранить topic_id в базе данных
+            if topic_id > 0:
+                async with async_session_maker() as session:
+                    await UserCRUD.update_forum_topic_id(session, user_id, topic_id)
+                logger.info(f"Stored topic_id {topic_id} for user {user_id}")
+
         except Exception as forum_error:
             logger.error(f"Error creating forum topic for user {user_id}: {forum_error}")
 
