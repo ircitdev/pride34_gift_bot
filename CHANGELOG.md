@@ -2,6 +2,96 @@
 
 Все изменения проекта Pride34 Gift Bot.
 
+## [2.5.0] - 2025-12-29
+
+### Улучшено - services/image_processor.py
+
+**Комплексная оптимизация с 6 критическими улучшениями**
+
+#### 1. Async/Await оптимизация - asyncio.to_thread
+- **БЫЛО:** PIL/OpenCV операции блокировали event loop
+- **СТАЛО:** `asyncio.to_thread` для CPU-bound операций
+- **Метод:** `_generate_fallback()` → `_process_fallback_sync()`
+- **Результат:** Бот обрабатывает других пользователей во время генерации
+
+#### 2. Предзагрузка ресурсов в __init__
+- **БЫЛО:** `CascadeClassifier` загружался при каждом вызове
+- **СТАЛО:** Загрузка один раз в `__init__()`
+- **Экономия:** ~50-100ms на каждой генерации
+- **Результат:** Улучшенная производительность
+
+#### 3. Исправление padding расчёта
+- **БЫЛО:** `x = max(0, x - padding)` но `w = w + 2 * padding` (некорректно)
+- **СТАЛО:** `left/top/right/bottom` с корректным учётом границ
+- **Строки:** 187-190
+- **Результат:** Лица центрированы правильно даже у края
+
+#### 4. DRY принцип - _apply_logo_overlay()
+- **БЫЛО:** Дублирование логики в 2 местах
+- **СТАЛО:** Единый метод `_apply_logo_overlay()`
+- **Устранено:** 40+ строк дублирования
+- **Результат:** Легче поддерживать, меньше ошибок
+
+#### 5. Линейная структура стратегий
+- **БЫЛО:** Глубокий nested try-except ("arrow code")
+- **СТАЛО:** Линейная последовательность стратегий 1→2→3
+- **Добавлено:** Логирование в каждом except блоке
+- **Результат:** Легче читать и отлаживать
+
+#### 6. Константы вместо магических чисел
+- **Добавлено:** `DEFAULT_BG_COLOR`, `FACE_SIZE`, `CANVAS_SIZE`, etc.
+- **Type hints:** `Tuple[int, int, int]` для всех констант
+- **Результат:** Понятнее код, легче настраивать
+
+### Архитектура
+
+**Новые методы:**
+- `_generate_via_ai()` - выделенный метод для AI-генерации
+- `_generate_fallback()` - async wrapper для fallback
+- `_process_fallback_sync()` - синхронная реализация в отдельном потоке
+- `_apply_logo_overlay()` - универсальный метод наложения логотипа
+- `_get_font()` - безопасная загрузка шрифта
+
+**Обновлённые методы:**
+- `create_christmas_figure()` - линейная структура стратегий
+- `_extract_face()` - исправлен padding, используется предзагруженный cascade
+- `_create_circular_crop()` - упрощён расчёт, используется FACE_SIZE константа
+- `_composite_face_on_template()` - использует `_apply_logo_overlay()`
+- `_create_placeholder()` - использует `_apply_logo_overlay()` и константы
+- `_create_default_template()` - использует константы и `_get_font()`
+
+### Константы (module level)
+```python
+DEFAULT_BG_COLOR: Tuple[int, int, int] = (18, 74, 90)  # Teal
+DEFAULT_BODY_COLOR: Tuple[int, int, int] = (0, 51, 102)
+DEFAULT_SKIN_COLOR: Tuple[int, int, int] = (255, 220, 177)
+DEFAULT_TEXT_COLOR: Tuple[int, int, int] = (255, 140, 0)
+FACE_SIZE: Tuple[int, int] = (400, 400)
+CANVAS_SIZE: Tuple[int, int] = (800, 1200)
+```
+
+### Импорты
+
+**Добавлено:**
+- `import asyncio` - для `asyncio.to_thread`
+- `from typing import Optional, Tuple` - для type hints
+
+**Убрано:**
+- `from PIL import ImageFilter` - не используется
+
+### Производительность
+
+- **Event loop:** Больше не блокируется во время обработки изображений
+- **Предзагрузка:** Cascade загружается 1 раз вместо N раз
+- **Масштабируемость:** Бот может обрабатывать несколько запросов параллельно
+
+### Совместимость
+
+- **Python:** Требуется Python 3.9+ (для `asyncio.to_thread`)
+- **Зависимости:** Без изменений (все уже в requirements.txt)
+
+---
+
 ## [2.4.0] - 2025-12-29
 
 ### Улучшено - services/face_swapper.py
