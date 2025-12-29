@@ -48,21 +48,19 @@ def get_share_keyboard(bot_username: str, user_id: int, has_premium: bool = Fals
     """
     builder = InlineKeyboardBuilder()
 
-    # Instagram sharing
-    builder.button(text="Поделиться в Instagram", url="https://www.instagram.com/pride34.ru/")
-
     # VK sharing
     vk_share_url = "https://vk.com/share.php?url=https://t.me/PRIDE34_GIFT_BOT"
-    builder.button(text="Поделиться в VK", url=vk_share_url)
+    builder.button(text="📱 Поделиться в VK", url=vk_share_url)
 
     # Telegram native sharing (only for Premium users)
     if has_premium:
+        referral_link = f"https://t.me/{bot_username}?start=ref{user_id}"
         builder.button(
-            text="Поделиться в Telegram",
-            url=f"https://t.me/share/url?url=https://t.me/{bot_username}?start=ref{user_id}"
+            text="✈️ Поделиться в Telegram",
+            url=f"https://t.me/share/url?url={referral_link}"
         )
 
-    # Referral sharing - opens contact list via switch_inline_query
+    # Referral sharing - opens contact picker
     builder.button(text="🎁 Рассказать друзьям", callback_data="share_with_friends")
 
     builder.adjust(1)  # One button per row

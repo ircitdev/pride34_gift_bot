@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 
 from config import settings
 from database.engine import init_db
-from handlers import start, quiz, photo, admin, forum_communication, user_replies, text_editor
+from handlers import start, quiz, photo, admin, forum_communication, user_replies, text_editor, inline
 
 
 # Configure logging
@@ -43,6 +43,7 @@ async def main():
     dp.include_router(photo.router)
     dp.include_router(admin.router)  # Includes advanced broadcast with grouping
     dp.include_router(text_editor.router)          # Text editor
+    dp.include_router(inline.router)               # Inline mode for sharing
     dp.include_router(forum_communication.router)  # Forum -> User messaging
     dp.include_router(user_replies.router)         # User -> Forum messaging
 

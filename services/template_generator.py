@@ -2,6 +2,7 @@
 import logging
 import random
 from pathlib import Path
+from typing import Optional, Tuple
 from PIL import Image
 import cv2
 import numpy as np
@@ -27,6 +28,14 @@ class TemplateGenerator:
         # Try both naming conventions
         self.male_template = self._find_template("male")
         self.female_template = self._find_template("female")
+
+        # Pre-load face cascade classifier (performance optimization)
+        cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        self.face_cascade = cv2.CascadeClassifier(cascade_path)
+
+        if self.face_cascade.empty():
+            logger.error("Failed to load Haar Cascade classifier")
+            raise RuntimeError("Face detection cascade not loaded")
 
     def _find_template(self, gender: str) -> Path:
         """Find template file with flexible naming."""
@@ -138,8 +147,8 @@ class TemplateGenerator:
             # Detect face region on template (blank head area)
             template_face_region = self._detect_template_face_region(template)
 
-            # Perform high-quality face swap
-            result = self._advanced_face_swap(template, user_face, template_face_region)
+            # Perform professional face swap with Poisson Blending
+            result = self._seamless_face_swap(template, user_face, template_face_region)
 
             # Logo is already in template, no need to add
             # result = self._add_logo(result)
@@ -155,15 +164,17 @@ class TemplateGenerator:
             logger.error(f"Template generation failed: {e}")
             raise
 
-    def _extract_face(self, img: np.ndarray) -> np.ndarray:
-        """Extract face from user photo."""
+    def _extract_face(self, img: np.ndarray) -> Optional[np.ndarray]:
+        """Extract face from user photo using pre-loaded cascade classifier."""
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        face_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+        # Use pre-loaded cascade (instead of creating new instance each time)
+        faces = self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(60, 60)
         )
-
-        faces = face_cascade.detectMultiScale(gray, 1.1, 5)
 
         if len(faces) == 0:
             return None
@@ -192,7 +203,7 @@ class TemplateGenerator:
         y = (h - size) // 2
         return img[y:y+size, x:x+size]
 
-    def _detect_template_face_region(self, template: np.ndarray) -> tuple:
+    def _detect_template_face_region(self, template: np.ndarray) -> Tuple[int, int, int, int]:
         """
         Detect where to place face on template.
 
@@ -206,22 +217,23 @@ class TemplateGenerator:
         head_width = int(w * 0.20)   # 20% ширины шаблона (было 0.17)
         head_height = int(w * 0.23)  # 23% ширины для учета волос (было 0.17)
 
-        # Position - центр по горизонтали, 14% от верха (было 11%)
+        # Position - центр по горизонтали, 14% от верха + 20px смещение вниз
         x = (w - head_width) // 2  # Центр по горизонтали
-        y = int(h * 0.14)  # 14% от верха - оптимальная позиция
+        y = int(h * 0.14) + 20  # 14% от верха + 20px вниз для лучшего позиционирования
 
         logger.info(f"Template size: {w}x{h}, Face region: x={x}, y={y}, w={head_width}, h={head_height}")
 
         return (x, y, head_width, head_height)
 
-    def _advanced_face_swap(
+    def _advanced_face_swap_legacy(
         self,
         template: np.ndarray,
         user_face: np.ndarray,
-        face_region: tuple
+        face_region: Tuple[int, int, int, int]
     ) -> np.ndarray:
         """
-        Advanced face swapping with color matching and seamless blending.
+        Legacy face swapping with color matching and Gaussian blur blending.
+        Kept for comparison and fallback purposes.
         """
         x, y, w, h = face_region
 
@@ -261,8 +273,33 @@ class TemplateGenerator:
 
         return result
 
+    def _match_colors_simple(self, source: np.ndarray, target: np.ndarray) -> np.ndarray:
+        """
+        Simple LAB color transfer for L channel only.
+        Preserves skin tone while adjusting brightness for seamlessClone.
+
+        Args:
+            source: Source image (user face)
+            target: Target image (template ROI)
+
+        Returns:
+            Color-matched source image
+        """
+        source_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB).astype(np.float32)
+        target_lab = cv2.cvtColor(target, cv2.COLOR_BGR2LAB).astype(np.float32)
+
+        # Only adjust L channel (lightness) - preserves skin tone
+        l_mean_src = source_lab[:, :, 0].mean()
+        l_mean_tgt = target_lab[:, :, 0].mean()
+
+        # Damping factor 0.6 prevents over-adjustment
+        l_diff = (l_mean_tgt - l_mean_src) * 0.6
+        source_lab[:, :, 0] = np.clip(source_lab[:, :, 0] + l_diff, 0, 255)
+
+        return cv2.cvtColor(source_lab.astype(np.uint8), cv2.COLOR_LAB2BGR)
+
     def _match_colors(self, source: np.ndarray, target: np.ndarray) -> np.ndarray:
-        """Match color distribution of source to target."""
+        """Match color distribution of source to target (legacy method for fallback)."""
         source_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB).astype(np.float32)
         target_lab = cv2.cvtColor(target, cv2.COLOR_BGR2LAB).astype(np.float32)
 
@@ -282,8 +319,124 @@ class TemplateGenerator:
         source_lab = np.clip(source_lab, 0, 255).astype(np.uint8)
         return cv2.cvtColor(source_lab, cv2.COLOR_LAB2BGR)
 
+    def _seamless_face_swap(
+        self,
+        template: np.ndarray,
+        user_face: np.ndarray,
+        face_region: Tuple[int, int, int, int]
+    ) -> np.ndarray:
+        """
+        Professional face swapping using Poisson Blending (cv2.seamlessClone).
+
+        This method provides superior quality compared to simple alpha blending:
+        - Automatically adjusts lighting gradients
+        - Seamless edges using gradient domain editing
+        - Preserves texture details
+
+        Args:
+            template: Base template image
+            user_face: Extracted user face region
+            face_region: Target region (x, y, w, h)
+
+        Returns:
+            Template with face seamlessly blended
+        """
+        x, y, w, h = face_region
+
+        # Bounds checking
+        template_h, template_w = template.shape[:2]
+        actual_h = min(h, template_h - y)
+        actual_w = min(w, template_w - x)
+
+        if actual_h != h or actual_w != w:
+            logger.warning(
+                f"Face region {w}x{h} at ({x},{y}) exceeds template bounds "
+                f"{template_w}x{template_h}, adjusting to {actual_w}x{actual_h}"
+            )
+            w, h = actual_w, actual_h
+
+        # Resize user face with high-quality interpolation
+        user_face_resized = cv2.resize(user_face, (w, h), interpolation=cv2.INTER_LANCZOS4)
+
+        # Create elliptical mask for natural face shape
+        mask = np.zeros(user_face_resized.shape, dtype=np.uint8)
+        center = (w // 2, h // 2)
+        axes = (int(w * 0.45), int(h * 0.45))
+        cv2.ellipse(mask, center, axes, 0, 0, 360, (255, 255, 255), -1)
+
+        # Pre-color matching helps seamlessClone with large lighting differences
+        template_roi = template[y:y+h, x:x+w]
+        user_face_matched = self._match_colors_simple(user_face_resized, template_roi)
+
+        # Calculate center point for seamless cloning
+        clone_center = (x + w // 2, y + h // 2)
+
+        try:
+            # Poisson Blending - industry standard for face swapping
+            result = cv2.seamlessClone(
+                user_face_matched,
+                template,
+                mask,
+                clone_center,
+                cv2.NORMAL_CLONE  # NORMAL_CLONE for full texture replacement
+            )
+            logger.info("Seamless cloning successful")
+            return result
+
+        except cv2.error as e:
+            # Fallback to manual blending if seamlessClone fails
+            logger.warning(f"Seamless clone failed: {e}, using fallback blend")
+            return self._fallback_blend(template, user_face_matched, (x, y, w, h), mask)
+
+    def _fallback_blend(
+        self,
+        template: np.ndarray,
+        face: np.ndarray,
+        region: Tuple[int, int, int, int],
+        mask: np.ndarray
+    ) -> np.ndarray:
+        """
+        Fallback blending method if seamlessClone crashes.
+
+        Uses Gaussian blur alpha blending as safe alternative.
+
+        Args:
+            template: Base template image
+            face: Color-matched face to blend
+            region: Target region (x, y, w, h)
+            mask: Binary mask for blending
+
+        Returns:
+            Template with face blended using alpha blending
+        """
+        x, y, w, h = region
+        result = template.copy()
+
+        # Convert mask to float and apply strong blur
+        mask_float = mask[:, :, 0].astype(np.float32) / 255.0
+        mask_float = cv2.GaussianBlur(mask_float, (21, 21), 10)
+        mask_3ch = cv2.merge([mask_float, mask_float, mask_float])
+
+        # Alpha blending
+        roi = result[y:y+h, x:x+w].astype(np.float32)
+        face_float = face.astype(np.float32)
+        blended = (face_float * mask_3ch + roi * (1 - mask_3ch)).astype(np.uint8)
+        result[y:y+h, x:x+w] = blended
+
+        logger.info("Fallback blending applied")
+        return result
+
     def _create_blend_mask(self, w: int, h: int) -> np.ndarray:
-        """Create smooth blending mask."""
+        """
+        Create smooth blending mask (legacy method).
+
+        Args:
+            w: Mask width
+            h: Mask height
+
+        Returns:
+            Float mask with smooth edges
+        """
         mask = np.zeros((h, w), dtype=np.float32)
 
         # Elliptical mask

@@ -248,8 +248,6 @@ async def handle_invalid_photo(message: Message):
 @router.callback_query(F.data == "share_with_friends")
 async def handle_share_with_friends(callback: CallbackQuery):
     """Handle 'Рассказать друзьям' button - opens contact list with referral link."""
-    await callback.answer()
-
     user_id = callback.from_user.id
 
     # Get bot info for username
@@ -267,19 +265,37 @@ async def handle_share_with_friends(callback: CallbackQuery):
         f"👉 {referral_link}"
     )
 
-    # Use switch_inline_query to open contact list
-    # Note: This requires the bot to have inline mode enabled
+    # Answer callback
+    await callback.answer(
+        text="Нажмите на кнопку ниже, чтобы выбрать друзей для отправки",
+        show_alert=False
+    )
+
+    # Create keyboard with contact picker button
     from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from aiogram.types import InlineKeyboardButton, SwitchInlineQueryChosenChat
+
     builder = InlineKeyboardBuilder()
-    builder.button(
-        text="📤 Поделиться с друзьями",
-        switch_inline_query=share_text
+
+    # Create SwitchInlineQueryChosenChat object for contact picker
+    switch_inline = SwitchInlineQueryChosenChat(
+        query=share_text,
+        allow_user_chats=True,
+        allow_bot_chats=False,
+        allow_group_chats=False,
+        allow_channel_chats=False
+    )
+
+    builder.row(
+        InlineKeyboardButton(
+            text="📤 Выбрать друзей и отправить",
+            switch_inline_query_chosen_chat=switch_inline
+        )
     )
     builder.button(
         text="◀️ Назад",
         callback_data="close_share_menu"
     )
-    builder.adjust(1)
 
     await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
 
