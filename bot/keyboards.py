@@ -37,7 +37,7 @@ def get_quiz_keyboard(question_number: int, options: list) -> InlineKeyboardMark
     return builder.as_markup()
 
 
-def get_share_keyboard(bot_username: str, user_id: int, has_premium: bool = False) -> InlineKeyboardMarkup:
+def get_share_keyboard(bot_username: str, user_id: int, has_premium: bool = False, image_file_id: str = None) -> InlineKeyboardMarkup:
     """
     Get share result keyboard with social sharing options.
 
@@ -45,19 +45,31 @@ def get_share_keyboard(bot_username: str, user_id: int, has_premium: bool = Fals
         bot_username: Bot username for creating referral link
         user_id: User ID for referral system
         has_premium: Whether user has Telegram Premium (for native sharing)
+        image_file_id: Telegram file_id of generated image for stories
     """
     builder = InlineKeyboardBuilder()
 
-    # VK sharing
-    vk_share_url = "https://vk.com/share.php?url=https://t.me/PRIDE34_GIFT_BOT"
-    builder.button(text="📱 Поделиться в VK", url=vk_share_url)
+    # Referral link for all sharing
+    referral_link = f"https://t.me/{bot_username}?start=ref{user_id}"
 
-    # Telegram native sharing (only for Premium users)
+    # Instagram Stories - opens Instagram app with sharing intent
+    # Note: Works only on mobile devices with Instagram installed
+    builder.button(
+        text="📸 Опубликовать в Instagram Stories",
+        callback_data=f"share_instagram_{user_id}"
+    )
+
+    # VK Stories - opens VK app with sharing intent
+    builder.button(
+        text="📱 Опубликовать в VK Stories",
+        callback_data=f"share_vk_{user_id}"
+    )
+
+    # Telegram Stories (only for Premium users)
     if has_premium:
-        referral_link = f"https://t.me/{bot_username}?start=ref{user_id}"
         builder.button(
-            text="✈️ Поделиться в Telegram",
-            url=f"https://t.me/share/url?url={referral_link}"
+            text="✈️ Опубликовать в Telegram Stories",
+            callback_data=f"share_tg_story_{user_id}"
         )
 
     # Referral sharing - opens contact picker

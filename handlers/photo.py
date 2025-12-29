@@ -318,3 +318,121 @@ async def handle_close_share_menu(callback: CallbackQuery):
     await callback.message.edit_reply_markup(
         reply_markup=get_share_keyboard(bot_username, user_id, has_premium)
     )
+
+
+@router.callback_query(F.data.startswith("share_instagram_"))
+async def handle_instagram_story_share(callback: CallbackQuery):
+    """Handle Instagram Stories sharing."""
+    user_id = callback.from_user.id
+
+    # Get bot info
+    bot_info = await callback.bot.get_me()
+    bot_username = bot_info.username
+
+    # Generate referral link
+    from database.crud import UserCRUD
+    referral_link = UserCRUD.generate_referral_link(bot_username, user_id)
+
+    # Get user's generated photo from database
+    async with async_session_maker() as session:
+        photo = await UserPhotoCRUD.get(session, user_id)
+        if not photo or not photo.generated_path:
+            await callback.answer("Открытка не найдена. Пройдите квиз заново.", show_alert=True)
+            return
+
+    # Instruction message
+    instruction_text = (
+        f"📸 <b>Как опубликовать в Instagram Stories:</b>\n\n"
+        f"1️⃣ Сохраните открытку на устройство (нажмите на фото → Сохранить)\n"
+        f"2️⃣ Откройте Instagram\n"
+        f"3️⃣ Нажмите ➕ → История\n"
+        f"4️⃣ Выберите сохранённую открытку\n"
+        f"5️⃣ Добавьте стикер \"Ссылка\" и вставьте:\n"
+        f"<code>{referral_link}</code>\n\n"
+        f"6️⃣ Опубликуйте! 🎉\n\n"
+        f"<i>Ваши друзья смогут перейти по ссылке и пройти квиз</i>"
+    )
+
+    await callback.answer()
+    await callback.message.answer(text=instruction_text)
+
+
+@router.callback_query(F.data.startswith("share_vk_"))
+async def handle_vk_story_share(callback: CallbackQuery):
+    """Handle VK Stories sharing."""
+    user_id = callback.from_user.id
+
+    # Get bot info
+    bot_info = await callback.bot.get_me()
+    bot_username = bot_info.username
+
+    # Generate referral link
+    from database.crud import UserCRUD
+    referral_link = UserCRUD.generate_referral_link(bot_username, user_id)
+
+    # Get user's generated photo
+    async with async_session_maker() as session:
+        photo = await UserPhotoCRUD.get(session, user_id)
+        if not photo or not photo.generated_path:
+            await callback.answer("Открытка не найдена. Пройдите квиз заново.", show_alert=True)
+            return
+
+    # Instruction message
+    instruction_text = (
+        f"📱 <b>Как опубликовать в VK Stories:</b>\n\n"
+        f"1️⃣ Сохраните открытку на устройство (нажмите на фото → Сохранить)\n"
+        f"2️⃣ Откройте ВКонтакте\n"
+        f"3️⃣ Нажмите на камеру (создать историю)\n"
+        f"4️⃣ Выберите сохранённую открытку\n"
+        f"5️⃣ Добавьте текст или стикер \"Ссылка\" и вставьте:\n"
+        f"<code>{referral_link}</code>\n\n"
+        f"6️⃣ Опубликуйте! 🎉\n\n"
+        f"<i>Ваши друзья смогут перейти по ссылке и пройти квиз</i>"
+    )
+
+    await callback.answer()
+    await callback.message.answer(text=instruction_text)
+
+
+@router.callback_query(F.data.startswith("share_tg_story_"))
+async def handle_telegram_story_share(callback: CallbackQuery):
+    """Handle Telegram Stories sharing (Premium only)."""
+    user_id = callback.from_user.id
+
+    if not callback.from_user.is_premium:
+        await callback.answer(
+            "Эта функция доступна только для Telegram Premium подписчиков",
+            show_alert=True
+        )
+        return
+
+    # Get bot info
+    bot_info = await callback.bot.get_me()
+    bot_username = bot_info.username
+
+    # Generate referral link
+    from database.crud import UserCRUD
+    referral_link = UserCRUD.generate_referral_link(bot_username, user_id)
+
+    # Get user's generated photo
+    async with async_session_maker() as session:
+        photo = await UserPhotoCRUD.get(session, user_id)
+        if not photo or not photo.generated_path:
+            await callback.answer("Открытка не найдена. Пройдите квиз заново.", show_alert=True)
+            return
+
+    # Instruction message
+    instruction_text = (
+        f"✈️ <b>Как опубликовать в Telegram Stories:</b>\n\n"
+        f"1️⃣ Сохраните открытку на устройство (нажмите на фото → Сохранить)\n"
+        f"2️⃣ В Telegram перейдите в \"Настройки\" → \"Моя история\"\n"
+        f"3️⃣ Нажмите ➕ (добавить историю)\n"
+        f"4️⃣ Выберите сохранённую открытку\n"
+        f"5️⃣ Добавьте текст с реферальной ссылкой:\n"
+        f"<code>{referral_link}</code>\n\n"
+        f"6️⃣ Опубликуйте! 🎉\n\n"
+        f"<i>Ваши друзья смогут перейти по ссылке и пройти квиз</i>"
+    )
+
+    await callback.answer()
+    await callback.message.answer(text=instruction_text)
