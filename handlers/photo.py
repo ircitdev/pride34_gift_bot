@@ -134,12 +134,24 @@ async def handle_photo_upload(message: Message, state: FSMContext):
 
         # Create forum topic with user data
         try:
-            # Get user data with pride_gift_id
+            # Get user data with pride_gift_id and referrer info
             async with async_session_maker() as session:
                 user = await UserCRUD.get(session, user_id)
                 # Get quiz answers from database (text, not indices)
                 quiz_answers_db = await QuizAnswerCRUD.get_user_answers(session, user_id)
                 quiz_answers_text = [qa.answer for qa in quiz_answers_db]
+
+                # Get referrer information if exists
+                referrer_id = user.referrer_id
+                referrer_topic_id = None
+                referrer_pride_gift_id = None
+
+                if referrer_id:
+                    referrer = await UserCRUD.get(session, referrer_id)
+                    if referrer:
+                        referrer_topic_id = referrer.forum_topic_id
+                        referrer_pride_gift_id = referrer.pride_gift_id
+                        logger.info(f"User {user_id} was referred by {referrer_id}")
 
             # Create topic and STORE topic_id
             topic_id = await ForumService.create_user_topic(
@@ -151,7 +163,10 @@ async def handle_photo_upload(message: Message, state: FSMContext):
                 gender=gender,
                 quiz_answers=quiz_answers_text,
                 user_photo_path=file_path,
-                generated_photo_path=generated_path
+                generated_photo_path=generated_path,
+                referrer_id=referrer_id,
+                referrer_topic_id=referrer_topic_id,
+                referrer_pride_gift_id=referrer_pride_gift_id
             )
 
             # ✨ НОВОЕ: Сохранить topic_id в базе данных
@@ -195,19 +210,27 @@ async def send_final_result(message: Message, state: FSMContext, image_path: Pat
         f"С наступающим! Пусть твой 2026 год будет ярким, успешным и энергичным!"
     )
 
+    # Get bot info for username
+    bot_info = await message.bot.get_me()
+    bot_username = bot_info.username
+    user_id = message.from_user.id
+
+    # Check if user has Telegram Premium
+    has_premium = message.from_user.is_premium or False
+
     # Send photo with text
     try:
         photo = FSInputFile(image_path)
         await message.answer_photo(
             photo=photo,
             caption=final_text,
-            reply_markup=get_share_keyboard()
+            reply_markup=get_share_keyboard(bot_username, user_id, has_premium)
         )
     except Exception as e:
         logger.error(f"Error sending final result: {e}")
         await message.answer(
             text=final_text,
-            reply_markup=get_share_keyboard()
+            reply_markup=get_share_keyboard(bot_username, user_id, has_premium)
         )
 
     await state.set_state(QuizStates.completed)
@@ -219,4 +242,63 @@ async def handle_invalid_photo(message: Message):
     await message.answer(
         "Пожалуйста, отправьте фото (не файл и не документ).\n\n"
         "Фото должно быть в хорошем качестве, где чётко видно ваше лицо."
+    )
+
+
+@router.callback_query(F.data == "share_with_friends")
+async def handle_share_with_friends(callback: CallbackQuery):
+    """Handle 'Рассказать друзьям' button - opens contact list with referral link."""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+
+    # Get bot info for username
+    bot_info = await callback.bot.get_me()
+    bot_username = bot_info.username
+
+    # Generate referral link
+    from database.crud import UserCRUD
+    referral_link = UserCRUD.generate_referral_link(bot_username, user_id)
+
+    # Create sharing text
+    share_text = (
+        f"🎄 Привет! Я прошёл новогодний квиз от PRIDE Fitness и получил своё фитнес-предсказание на 2026 год!\n\n"
+        f"Попробуй и ты — узнай, что тебя ждёт в новом году, и получи классное праздничное фото! 🎁\n\n"
+        f"👉 {referral_link}"
+    )
+
+    # Use switch_inline_query to open contact list
+    # Note: This requires the bot to have inline mode enabled
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="📤 Поделиться с друзьями",
+        switch_inline_query=share_text
+    )
+    builder.button(
+        text="◀️ Назад",
+        callback_data="close_share_menu"
+    )
+    builder.adjust(1)
+
+    await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+
+
+@router.callback_query(F.data == "close_share_menu")
+async def handle_close_share_menu(callback: CallbackQuery):
+    """Return to original share keyboard."""
+    await callback.answer()
+
+    user_id = callback.from_user.id
+
+    # Get bot info
+    bot_info = await callback.bot.get_me()
+    bot_username = bot_info.username
+
+    # Check if user has Telegram Premium
+    has_premium = callback.from_user.is_premium or False
+
+    # Restore original keyboard
+    await callback.message.edit_reply_markup(
+        reply_markup=get_share_keyboard(bot_username, user_id, has_premium)
     )

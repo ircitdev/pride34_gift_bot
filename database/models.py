@@ -23,6 +23,7 @@ class User(Base):
     photo_uploaded: Mapped[bool] = mapped_column(Boolean, default=False)
     gender: Mapped[str | None] = mapped_column(String(10), nullable=True)  # male, female
     is_winner: Mapped[bool] = mapped_column(Boolean, default=False)
+    referrer_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)  # ID пользователя, который пригласил
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username={self.username})>"

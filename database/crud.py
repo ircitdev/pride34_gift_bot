@@ -153,6 +153,28 @@ class UserCRUD:
         result = await session.execute(query)
         return list(result.scalars().all())
 
+    @staticmethod
+    async def set_referrer(session: AsyncSession, user_id: int, referrer_id: int):
+        """Set referrer ID for user."""
+        await session.execute(
+            update(User).where(User.id == user_id).values(referrer_id=referrer_id)
+        )
+        await session.commit()
+
+    @staticmethod
+    def generate_referral_link(bot_username: str, user_id: int) -> str:
+        """
+        Generate referral link for user.
+
+        Args:
+            bot_username: Bot username (e.g., 'PRIDE34_GIFT_BOT')
+            user_id: User ID to embed in referral link
+
+        Returns:
+            Referral link like: https://t.me/PRIDE34_GIFT_BOT?start=ref123456
+        """
+        return f"https://t.me/{bot_username}?start=ref{user_id}"
+
 
 
 class QuizAnswerCRUD:

@@ -37,17 +37,40 @@ def get_quiz_keyboard(question_number: int, options: list) -> InlineKeyboardMark
     return builder.as_markup()
 
 
-def get_share_keyboard() -> InlineKeyboardMarkup:
-    """Get share result keyboard."""
+def get_share_keyboard(bot_username: str, user_id: int, has_premium: bool = False) -> InlineKeyboardMarkup:
+    """
+    Get share result keyboard with social sharing options.
+
+    Args:
+        bot_username: Bot username for creating referral link
+        user_id: User ID for referral system
+        has_premium: Whether user has Telegram Premium (for native sharing)
+    """
     builder = InlineKeyboardBuilder()
+
+    # Instagram sharing
     builder.button(text="Поделиться в Instagram", url="https://www.instagram.com/pride34.ru/")
-    builder.button(text="Начать заново", callback_data="start_quiz")
-    builder.adjust(1)
+
+    # VK sharing
+    vk_share_url = "https://vk.com/share.php?url=https://t.me/PRIDE34_GIFT_BOT"
+    builder.button(text="Поделиться в VK", url=vk_share_url)
+
+    # Telegram native sharing (only for Premium users)
+    if has_premium:
+        builder.button(
+            text="Поделиться в Telegram",
+            url=f"https://t.me/share/url?url=https://t.me/{bot_username}?start=ref{user_id}"
+        )
+
+    # Referral sharing - opens contact list via switch_inline_query
+    builder.button(text="🎁 Рассказать друзьям", callback_data="share_with_friends")
+
+    builder.adjust(1)  # One button per row
     return builder.as_markup()
 
 
 def get_admin_keyboard() -> ReplyKeyboardMarkup:
-    """Get admin panel keyboard with 9 buttons."""
+    """Get admin panel keyboard with 10 buttons."""
     builder = ReplyKeyboardBuilder()
 
     # Row 1
@@ -68,8 +91,9 @@ def get_admin_keyboard() -> ReplyKeyboardMarkup:
 
     # Row 5
     builder.button(text="Редактировать тексты")
+    builder.button(text="Выдать сертификат")
 
-    builder.adjust(2, 2, 2, 2, 1)  # 5 rows
+    builder.adjust(2, 2, 2, 2, 2)  # 5 rows x 2 buttons
     return builder.as_markup(resize_keyboard=True)
 
 
@@ -249,4 +273,72 @@ def get_text_edit_back_keyboard() -> InlineKeyboardMarkup:
     """Get keyboard with back button for text editing."""
     builder = InlineKeyboardBuilder()
     builder.button(text="❌ Отмена", callback_data="text_back_categories")
+    return builder.as_markup()
+
+
+def get_certificate_users_keyboard(
+    users: list,
+    current_page: int,
+    total_pages: int
+) -> InlineKeyboardMarkup:
+    """Get keyboard with paginated user list for certificates."""
+    builder = InlineKeyboardBuilder()
+
+    # User buttons
+    for user in users:
+        if user.full_name and user.full_name.strip():
+            button_text = user.full_name
+        elif user.username:
+            button_text = f"@{user.username}"
+        else:
+            button_text = f"User {user.id}"
+
+        if len(button_text) > 30:
+            button_text = button_text[:27] + "..."
+
+        builder.button(text=button_text, callback_data=f"cert_select_{user.id}")
+
+    builder.adjust(2)  # 2 кнопки в ряду
+
+    # Navigation
+    if current_page > 0:
+        builder.button(text="◀️ Назад", callback_data=f"cert_page_{current_page - 1}")
+    else:
+        builder.button(text=" ", callback_data="admin_noop")
+
+    builder.button(text=f"{current_page + 1}/{total_pages}", callback_data="admin_noop")
+
+    if current_page < total_pages - 1:
+        builder.button(text="Вперед ▶️", callback_data=f"cert_page_{current_page + 1}")
+    else:
+        builder.button(text=" ", callback_data="admin_noop")
+
+    builder.adjust(2, 2, 3)
+
+    # Exit
+    builder.button(text="❌ Выйти", callback_data="cert_exit")
+    builder.adjust(2, 2, 3, 1)
+
+    return builder.as_markup()
+
+
+def get_certificate_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Get confirmation keyboard for certificate sending."""
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="✅ Да, отправить", callback_data="cert_confirm_yes")
+    builder.button(text="❌ Отмена", callback_data="cert_confirm_no")
+
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+def get_certificate_after_send_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard after certificate was sent."""
+    builder = InlineKeyboardBuilder()
+
+    builder.button(text="📜 Отправить еще", callback_data="cert_send_another")
+    builder.button(text="🚪 Выйти", callback_data="cert_exit")
+
+    builder.adjust(2)
     return builder.as_markup()

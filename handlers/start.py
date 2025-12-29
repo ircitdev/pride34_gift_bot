@@ -18,19 +18,41 @@ logger = logging.getLogger(__name__)
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
-    """Handle /start command."""
+    """Handle /start command with optional referral parameter."""
     user_id = message.from_user.id
     username = message.from_user.username
     full_name = message.from_user.full_name
 
+    # Parse referral parameter from /start command
+    # Format: /start ref{referrer_user_id}
+    referrer_id = None
+    if message.text and len(message.text.split()) > 1:
+        start_param = message.text.split()[1]
+        if start_param.startswith("ref"):
+            try:
+                referrer_id = int(start_param[3:])  # Extract ID after "ref"
+                logger.info(f"User {user_id} came via referral from {referrer_id}")
+            except ValueError:
+                logger.warning(f"Invalid referral parameter: {start_param}")
+
     # Register user in database
     async with async_session_maker() as session:
-        await UserCRUD.get_or_create(
+        user = await UserCRUD.get_or_create(
             session,
             user_id=user_id,
             username=username,
             full_name=full_name
         )
+
+        # Set referrer if this is a new user and referral link was used
+        if referrer_id and not user.referrer_id:
+            # Verify referrer exists
+            referrer = await UserCRUD.get(session, referrer_id)
+            if referrer:
+                await UserCRUD.set_referrer(session, user_id, referrer_id)
+                logger.info(f"Set referrer {referrer_id} for user {user_id}")
+            else:
+                logger.warning(f"Referrer {referrer_id} not found")
 
     logger.info(f"User {user_id} started the bot")
 

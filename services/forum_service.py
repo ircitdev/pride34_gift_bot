@@ -22,7 +22,10 @@ class ForumService:
         gender: str,
         quiz_answers: list,
         user_photo_path: Path,
-        generated_photo_path: Path
+        generated_photo_path: Path,
+        referrer_id: int = None,
+        referrer_topic_id: int = None,
+        referrer_pride_gift_id: int = None
     ) -> int:
         """
         Create a topic for user and post their data.
@@ -37,6 +40,9 @@ class ForumService:
             quiz_answers: List of quiz answers (answer texts from database)
             user_photo_path: Path to uploaded user photo
             generated_photo_path: Path to generated Christmas image
+            referrer_id: ID of user who referred this user (optional)
+            referrer_topic_id: Forum topic ID of referrer (optional)
+            referrer_pride_gift_id: Pride GIFT ID of referrer (optional)
 
         Returns:
             Topic ID (message_thread_id)
@@ -75,9 +81,19 @@ class ForumService:
                 f"<b>Telegram ID:</b> <code>{user_id}</code>\n"
                 f"<b>Username:</b> {username_text}\n"
                 f"<b>Имя:</b> {full_name or '—'}\n"
-                f"<b>Пол:</b> {'Мужской' if gender == 'male' else 'Женский'}\n\n"
-                f"<b>Ответы на квиз:</b>\n"
+                f"<b>Пол:</b> {'Мужской' if gender == 'male' else 'Женский'}\n"
             )
+
+            # Add referral information if user came via referral link
+            if referrer_id and referrer_topic_id and referrer_pride_gift_id:
+                # Create link to referrer's topic
+                topic_link = f"https://t.me/c/{str(settings.FORUM_GROUP_ID)[4:]}/{referrer_topic_id}"
+                user_data_text += (
+                    f"\n🎁 <b>Реферал от:</b> Pride GIFT ID <code>{referrer_pride_gift_id}</code>\n"
+                    f"👉 <a href='{topic_link}'>Перейти к топику реферера</a>\n"
+                )
+
+            user_data_text += "\n<b>Ответы на квиз:</b>\n"
 
             # Add quiz answers with full question and answer text
             for i, answer_text in enumerate(quiz_answers, 1):
