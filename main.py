@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 
 from config import settings
 from database.engine import init_db
-from handlers import start, quiz, photo, admin, broadcast, forum_communication, user_replies, text_editor
+from handlers import start, quiz, photo, admin, forum_communication, user_replies, text_editor
 
 
 # Configure logging
@@ -41,11 +41,10 @@ async def main():
     dp.include_router(start.router)
     dp.include_router(quiz.router)
     dp.include_router(photo.router)
-    dp.include_router(admin.router)
-    dp.include_router(broadcast.router)
-    dp.include_router(text_editor.router)          # НОВЫЙ: Редактирование текстов
-    dp.include_router(forum_communication.router)  # НОВЫЙ: Обработка сообщений из форума
-    dp.include_router(user_replies.router)         # НОВЫЙ: Пересылка ответов пользователей в форум
+    dp.include_router(admin.router)  # Includes advanced broadcast with grouping
+    dp.include_router(text_editor.router)          # Text editor
+    dp.include_router(forum_communication.router)  # Forum -> User messaging
+    dp.include_router(user_replies.router)         # User -> Forum messaging
 
     logger.info("Bot started")
 
