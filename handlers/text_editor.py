@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def is_admin(user_id: int) -> bool:
     """Check if user is admin."""
-    return user_id in settings.ADMIN_IDS
+    return user_id in settings.admin_ids_list
 
 
 @router.message(F.text == "Редактировать тексты")
