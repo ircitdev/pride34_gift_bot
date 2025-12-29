@@ -78,7 +78,7 @@ def get_group_link_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text="Открыть группу",
-        url="https://t.me/c/3652398755/"
+        url="https://t.me/+1MPUf8FMfFw3MDgy"
     )
     return builder.as_markup()
 
