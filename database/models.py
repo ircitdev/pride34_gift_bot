@@ -69,3 +69,18 @@ class QuizQuestion(Base):
 
     def __repr__(self) -> str:
         return f"<QuizQuestion(number={self.question_number})>"
+
+
+class UserMessage(Base):
+    """User message tracking for forum communication."""
+    __tablename__ = "user_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    forum_message_id: Mapped[int] = mapped_column(Integer, nullable=False)  # Message ID in forum
+    user_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Message ID in private chat
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)  # 'to_user' or 'from_user'
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<UserMessage(user_id={self.user_id}, direction={self.direction})>"

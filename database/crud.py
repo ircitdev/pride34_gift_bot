@@ -3,7 +3,7 @@ from typing import List, Optional
 import random
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.models import User, QuizAnswer, UserPhoto, QuizQuestion
+from database.models import User, QuizAnswer, UserPhoto, QuizQuestion, UserMessage
 
 
 class UserCRUD:
@@ -103,6 +103,56 @@ class UserCRUD:
         )
         return list(result.scalars().all())
 
+    @staticmethod
+    async def mark_quiz_completed(session: AsyncSession, user_id: int):
+        """Mark user as completed quiz (received card)."""
+        await session.execute(
+            update(User).where(User.id == user_id).values(quiz_completed=True)
+        )
+        await session.commit()
+
+    @staticmethod
+    async def update_forum_topic(session: AsyncSession, user_id: int, topic_id: int):
+        """Update forum topic ID for user."""
+        await session.execute(
+            update(User).where(User.id == user_id).values(forum_topic_id=topic_id)
+        )
+        await session.commit()
+
+    @staticmethod
+    async def get_users_by_filter(
+        session: AsyncSession,
+        filter_type: str
+    ) -> List[User]:
+        """
+        Get users by filter type.
+
+        Filter types:
+        - 'all': All users
+        - 'male': Male users
+        - 'female': Female users
+        - 'completed': Users who received card
+        - 'incomplete': Users who didn't complete quiz
+        - 'admins': Admin users only (for testing)
+        """
+        query = select(User)
+
+        if filter_type == 'male':
+            query = query.where(User.gender == 'male')
+        elif filter_type == 'female':
+            query = query.where(User.gender == 'female')
+        elif filter_type == 'completed':
+            query = query.where(User.quiz_completed == True)
+        elif filter_type == 'incomplete':
+            query = query.where(User.quiz_completed == False)
+        elif filter_type == 'admins':
+            from config import settings
+            query = query.where(User.id.in_(settings.admin_ids_list))
+        # 'all' - no filter
+
+        result = await session.execute(query)
+        return list(result.scalars().all())
+
 
 
 class QuizAnswerCRUD:
@@ -177,5 +227,35 @@ class QuizQuestionCRUD:
         """Get all questions."""
         result = await session.execute(
             select(QuizQuestion).order_by(QuizQuestion.question_number)
+        )
+        return list(result.scalars().all())
+
+
+class UserMessageCRUD:
+    """CRUD operations for user messages."""
+
+    @staticmethod
+    async def log_message(
+        session: AsyncSession,
+        user_id: int,
+        forum_message_id: int,
+        user_message_id: int | None,
+        direction: str
+    ):
+        """Log a message exchange."""
+        message = UserMessage(
+            user_id=user_id,
+            forum_message_id=forum_message_id,
+            user_message_id=user_message_id,
+            direction=direction
+        )
+        session.add(message)
+        await session.commit()
+
+    @staticmethod
+    async def get_user_messages(session: AsyncSession, user_id: int) -> List[UserMessage]:
+        """Get all messages for a user."""
+        result = await session.execute(
+            select(UserMessage).where(UserMessage.user_id == user_id).order_by(UserMessage.created_at)
         )
         return list(result.scalars().all())

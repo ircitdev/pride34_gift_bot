@@ -19,7 +19,9 @@ from bot.keyboards import (
     get_winners_count_menu_keyboard,
     get_winners_count_confirm_keyboard,
     get_date_menu_keyboard,
-    get_date_confirm_keyboard
+    get_date_confirm_keyboard,
+    get_broadcast_group_select_keyboard,
+    get_broadcast_preview_keyboard
 )
 from bot.states import AdminStates
 from database.engine import async_session_maker
@@ -32,6 +34,17 @@ logger = logging.getLogger(__name__)
 
 # Constants
 USERS_PER_PAGE = 10
+
+# Group names for broadcast
+GROUP_NAMES = {
+    'all': '👥 Все пользователи',
+    'male': '👨 Мужчины',
+    'female': '👩 Женщины',
+    'completed': '✅ Получили открытку',
+    'incomplete': '⏳ Не дошли до открытки',
+    'personal': '👤 Персональная рассылка',
+    'admins': '🧪 Тестовая рассылка (админы)'
+}
 
 
 def is_admin(user_id: int) -> bool:
@@ -514,11 +527,208 @@ async def handle_cancel_command(message: Message, state: FSMContext):
 async def handle_noop(callback: CallbackQuery):
     """Handle no-op callback (for disabled buttons)."""
     await callback.answer()
-# == Broadcast Handlers ==
+# == Enhanced Broadcast Handlers ==
 
 @router.message(F.text == "Отправить рассылку")
-async def start_broadcast_flow(message: Message, state: FSMContext):
-    """Start enhanced broadcast flow with user preview."""
+async def start_enhanced_broadcast(message: Message, state: FSMContext):
+    """Start enhanced broadcast with group selection."""
+    if not is_admin(message.from_user.id):
+        return
+
+    await message.answer(
+        "<b>📢 Отправка рассылки</b>\n\n"
+        "Выберите группу получателей:",
+        reply_markup=get_broadcast_group_select_keyboard()
+    )
+
+    await state.set_state(AdminStates.broadcast_select_group)
+
+
+@router.callback_query(F.data.startswith("broadcast_group_"))
+async def handle_group_selection(callback: CallbackQuery, state: FSMContext):
+    """Handle broadcast group selection."""
+    await callback.answer()
+
+    group_type = callback.data.replace("broadcast_group_", "")
+
+    # Handle personal broadcast separately
+    if group_type == "personal":
+        await callback.message.edit_text(
+            "<b>👤 Персональная рассылка</b>\n\n"
+            "Введите Telegram ID пользователя:"
+        )
+        await state.update_data(broadcast_group='personal')
+        await state.set_state(AdminStates.broadcast_personal_id_input)
+        return
+
+    # Get users for selected group
+    async with async_session_maker() as session:
+        users = await UserCRUD.get_users_by_filter(session, group_type)
+
+    if not users:
+        await callback.message.edit_text(
+            f"❌ В группе <b>{GROUP_NAMES[group_type]}</b> нет пользователей.\n\n"
+            "Выберите другую группу:",
+            reply_markup=get_broadcast_group_select_keyboard()
+        )
+        return
+
+    # Store group info
+    total_pages = math.ceil(len(users) / USERS_PER_PAGE)
+    await state.update_data(
+        broadcast_group=group_type,
+        broadcast_users=[u.id for u in users],
+        broadcast_total_pages=total_pages,
+        broadcast_current_page=0
+    )
+
+    # Show preview
+    await show_group_preview_page(callback.message, state, 0)
+    await state.set_state(AdminStates.broadcast_preview_group)
+
+
+@router.message(AdminStates.broadcast_personal_id_input, F.text)
+async def handle_personal_id_input(message: Message, state: FSMContext):
+    """Handle personal broadcast user ID input."""
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    try:
+        user_id = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Некорректный ID. Введите число:")
+        return
+
+    # Check if user exists
+    async with async_session_maker() as session:
+        user = await UserCRUD.get(session, user_id)
+
+    if not user:
+        await message.answer(
+            f"❌ Пользователь с ID <code>{user_id}</code> не найден.\n\n"
+            "Попробуйте другой ID:"
+        )
+        return
+
+    # Store single user
+    display_name = user.full_name or f"User {user.id}"
+    await state.update_data(
+        broadcast_group='personal',
+        broadcast_users=[user_id]
+    )
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    await message.answer(
+        f"<b>👤 Персональная рассылка</b>\n\n"
+        f"Получатель: {display_name}\n"
+        f"ID: <code>{user_id}</code>\n\n"
+        "Отправьте сообщение для рассылки:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="❌ Отмена", callback_data="admin_broadcast_cancel")
+        ]])
+    )
+
+    await state.set_state(AdminStates.broadcast_waiting_message)
+
+
+async def show_group_preview_page(message: Message, state: FSMContext, page: int):
+    """Display a page of users in selected group."""
+    data = await state.get_data()
+    user_ids = data.get("broadcast_users", [])
+    total_pages = data.get("broadcast_total_pages", 1)
+    group_type = data.get("broadcast_group", "all")
+
+    # Get users for this page
+    start_idx = page * USERS_PER_PAGE
+    end_idx = start_idx + USERS_PER_PAGE
+    page_user_ids = user_ids[start_idx:end_idx]
+
+    # Fetch details
+    async with async_session_maker() as session:
+        users = []
+        for uid in page_user_ids:
+            user = await UserCRUD.get(session, uid)
+            if user:
+                users.append(user)
+
+    # Build text
+    group_name = GROUP_NAMES[group_type]
+    text = f"<b>{group_name}</b>\n"
+    text += f"Страница {page + 1}/{total_pages}\n\n"
+    text += f"📊 Всего получателей: {len(user_ids)}\n\n"
+
+    for user in users:
+        display_name = user.full_name or f"User {user.id}"
+        gender_emoji = "👨" if user.gender == "male" else "👩"
+        status_emoji = "✅" if user.quiz_completed else "⏳"
+
+        if user.forum_topic_id:
+            link = f"https://t.me/c/3652398755/{user.forum_topic_id}"
+            text += f'{gender_emoji}{status_emoji} <a href="{link}">{display_name}</a>\n'
+        else:
+            text += f"{gender_emoji}{status_emoji} {display_name}\n"
+
+    try:
+        await message.edit_text(
+            text=text,
+            reply_markup=get_broadcast_preview_keyboard(page, total_pages, group_name),
+            disable_web_page_preview=True
+        )
+    except:
+        await message.answer(
+            text=text,
+            reply_markup=get_broadcast_preview_keyboard(page, total_pages, group_name),
+            disable_web_page_preview=True
+        )
+
+
+@router.callback_query(F.data.startswith("broadcast_preview_page_"))
+async def handle_preview_pagination(callback: CallbackQuery, state: FSMContext):
+    """Handle pagination in group preview."""
+    await callback.answer()
+
+    page = int(callback.data.split("_")[-1])
+    await state.update_data(broadcast_current_page=page)
+    await show_group_preview_page(callback.message, state, page)
+
+
+@router.callback_query(F.data == "broadcast_write_message")
+async def broadcast_write_message(callback: CallbackQuery, state: FSMContext):
+    """Proceed to message input."""
+    await callback.answer()
+
+    await callback.message.edit_text(
+        "📢 <b>Отправьте сообщение для рассылки</b>\n\n"
+        "Поддерживается:\n"
+        "• Текст с HTML-форматированием\n"
+        "• Фото с подписью\n"
+        "• Видео с подписью\n"
+        "• Документы\n\n"
+        "Для отмены используйте /cancel"
+    )
+
+    await state.set_state(AdminStates.broadcast_waiting_message)
+
+
+@router.callback_query(F.data == "broadcast_change_group")
+async def broadcast_change_group(callback: CallbackQuery, state: FSMContext):
+    """Return to group selection."""
+    await callback.answer()
+
+    await callback.message.edit_text(
+        "<b>📢 Отправка рассылки</b>\n\n"
+        "Выберите группу получателей:",
+        reply_markup=get_broadcast_group_select_keyboard()
+    )
+
+    await state.set_state(AdminStates.broadcast_select_group)
+
+
+# == Old Broadcast Handlers (for compatibility) ==
+
+async def start_broadcast_flow_old(message: Message, state: FSMContext):
+    """Old broadcast flow - kept for compatibility."""
     if not is_admin(message.from_user.id):
         return
 

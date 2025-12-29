@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from bot.keyboards import get_gender_keyboard, get_share_keyboard
 from bot.states import QuizStates
 from bot.quiz_data import get_prediction
+from bot.texts import TextManager
 from database.engine import async_session_maker
 from database.crud import UserCRUD, UserPhotoCRUD, QuizAnswerCRUD
 from config import settings
@@ -20,13 +21,8 @@ logger = logging.getLogger(__name__)
 
 async def ask_gender(message: Message, state: FSMContext):
     """Ask user to select gender."""
-    text = (
-        "Отлично! Квиз завершён!\n\n"
-        "Ну что, добавим немного новогоднего волшебства?\n\n"
-        "Давай сделаем для тебя праздничное фото — такое, чтобы "
-        "захотелось сохранить и поделиться.\n\n"
-        "Для начала подскажи свой пол:"
-    )
+    # Get text from TextManager
+    text = TextManager.get('gender.text')
 
     await message.answer(
         text=text,
@@ -52,14 +48,8 @@ async def handle_gender_selection(callback: CallbackQuery, state: FSMContext):
     # Store gender in state
     await state.update_data(gender=gender)
 
-    # Ask for photo
-    text = (
-        "Теперь отправь улыбчивое фото, в хорошем качестве, где видно "
-        "твоё лицо\n\n"
-        "Желательно, чтобы ты был один в кадре — так магия сработает лучше\n\n"
-        "<i>Примечание: Фото используется только для создания вашего новогоднего "
-        "образа и не сохраняется после генерации.</i>"
-    )
+    # Ask for photo (get text from TextManager)
+    text = TextManager.get('photo.text')
 
     await callback.message.delete()
     await callback.message.answer(text=text)
@@ -167,8 +157,10 @@ async def handle_photo_upload(message: Message, state: FSMContext):
             # ✨ НОВОЕ: Сохранить topic_id в базе данных
             if topic_id > 0:
                 async with async_session_maker() as session:
-                    await UserCRUD.update_forum_topic_id(session, user_id, topic_id)
-                logger.info(f"Stored topic_id {topic_id} for user {user_id}")
+                    await UserCRUD.update_forum_topic(session, user_id, topic_id)
+                    # Отметить пользователя как завершившего квиз
+                    await UserCRUD.mark_quiz_completed(session, user_id)
+                logger.info(f"Stored topic_id {topic_id} and marked quiz completed for user {user_id}")
 
         except Exception as forum_error:
             logger.error(f"Error creating forum topic for user {user_id}: {forum_error}")

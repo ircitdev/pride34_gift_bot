@@ -1,5 +1,6 @@
 """Template-based image generation with professional face-swapping."""
 import logging
+import random
 from pathlib import Path
 from PIL import Image
 import cv2
@@ -18,7 +19,11 @@ class TemplateGenerator:
         self.templates_dir = settings.IMAGES_DIR / "templates"
         self.templates_dir.mkdir(exist_ok=True)
 
-        # Paths to high-quality 3D templates
+        # NEW: Directory with multiple templates
+        self.new_templates_dir = settings.IMAGES_DIR / "new_templates"
+        self.new_templates_dir.mkdir(exist_ok=True)
+
+        # Paths to high-quality 3D templates (fallback)
         # Try both naming conventions
         self.male_template = self._find_template("male")
         self.female_template = self._find_template("female")
@@ -41,6 +46,30 @@ class TemplateGenerator:
         # Return default path (will fail with clear error)
         return self.templates_dir / f"figure_{gender}_3d.png"
 
+    def _get_random_template(self, gender: str) -> Path:
+        """
+        Get random template from new_templates directory.
+
+        Args:
+            gender: 'male' or 'female'
+
+        Returns:
+            Path to randomly selected template
+        """
+        # Look for templates with pattern: figure_{gender}*.png
+        pattern = f"figure_{gender}*.png"
+        templates = list(self.new_templates_dir.glob(pattern))
+
+        if not templates:
+            # Fallback to old templates
+            logger.warning(f"No templates found in new_templates for {gender}, using fallback")
+            return self.male_template if gender == "male" else self.female_template
+
+        # Random selection
+        selected = random.choice(templates)
+        logger.info(f"Selected random template for {gender}: {selected.name}")
+        return selected
+
     async def generate_from_template(
         self,
         user_photo_path: Path,
@@ -49,6 +78,7 @@ class TemplateGenerator:
     ) -> Path:
         """
         Generate personalized image using pre-made 3D template.
+        Randomly selects from available templates in new_templates directory.
 
         Args:
             user_photo_path: Path to user's photo
@@ -59,13 +89,13 @@ class TemplateGenerator:
             Path to generated image
         """
         try:
-            # Load appropriate template
-            template_path = self.male_template if gender == "male" else self.female_template
+            # Use random template selection from new_templates
+            template_path = self._get_random_template(gender)
 
             if not template_path.exists():
                 raise FileNotFoundError(
                     f"Template not found: {template_path}. "
-                    "Please add 3D templates to images/templates/"
+                    "Please add 3D templates to images/new_templates/"
                 )
 
             logger.info(f"Using template: {template_path}")

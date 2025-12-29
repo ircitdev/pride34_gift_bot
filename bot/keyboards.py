@@ -1,20 +1,24 @@
 """Keyboard builders for the bot."""
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from bot.texts import TextManager
 
 
 def get_start_keyboard() -> InlineKeyboardMarkup:
     """Get start button keyboard."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="Начать квиз /start", callback_data="start_quiz")
+    button_text = TextManager.get('buttons.start', 'Я готов!')
+    builder.button(text=button_text, callback_data="start_quiz")
     return builder.as_markup()
 
 
 def get_gender_keyboard() -> InlineKeyboardMarkup:
     """Get gender selection keyboard."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="Мужской", callback_data="gender_male")
-    builder.button(text="Женский", callback_data="gender_female")
+    male_text = TextManager.get('buttons.gender_male', 'Мужской')
+    female_text = TextManager.get('buttons.gender_female', 'Женский')
+    builder.button(text=male_text, callback_data="gender_male")
+    builder.button(text=female_text, callback_data="gender_female")
     builder.adjust(2)
     return builder.as_markup()
 
@@ -43,7 +47,7 @@ def get_share_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_admin_keyboard() -> ReplyKeyboardMarkup:
-    """Get admin panel keyboard with 8 buttons."""
+    """Get admin panel keyboard with 9 buttons."""
     builder = ReplyKeyboardBuilder()
 
     # Row 1
@@ -62,7 +66,10 @@ def get_admin_keyboard() -> ReplyKeyboardMarkup:
     builder.button(text="Установить кол-во победителей")
     builder.button(text="Установить дату розыгрыша")
 
-    builder.adjust(2, 2, 2, 2)  # 4 rows with 2 buttons each
+    # Row 5
+    builder.button(text="Редактировать тексты")
+
+    builder.adjust(2, 2, 2, 2, 1)  # 5 rows
     return builder.as_markup(resize_keyboard=True)
 
 
@@ -152,4 +159,94 @@ def get_date_confirm_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="✅ Сохранить", callback_data="admin_date_save")
     builder.button(text="❌ Отмена", callback_data="admin_date_cancel")
     builder.adjust(2)
+    return builder.as_markup()
+
+
+def get_broadcast_group_select_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard for selecting broadcast target group."""
+    builder = InlineKeyboardBuilder()
+
+    # Groups
+    builder.button(text="👥 Все пользователи", callback_data="broadcast_group_all")
+    builder.button(text="👨 Мужчины", callback_data="broadcast_group_male")
+    builder.button(text="👩 Женщины", callback_data="broadcast_group_female")
+    builder.button(text="✅ Получили открытку", callback_data="broadcast_group_completed")
+    builder.button(text="⏳ Не дошли до открытки", callback_data="broadcast_group_incomplete")
+    builder.button(text="👤 Персонально (по ID)", callback_data="broadcast_group_personal")
+    builder.button(text="🧪 Тест (только админы)", callback_data="broadcast_group_admins")
+    builder.button(text="❌ Отмена", callback_data="admin_broadcast_cancel")
+
+    builder.adjust(1)  # One button per row
+    return builder.as_markup()
+
+
+def get_broadcast_preview_keyboard(
+    current_page: int,
+    total_pages: int,
+    group_name: str
+) -> InlineKeyboardMarkup:
+    """Get preview keyboard with group info."""
+    builder = InlineKeyboardBuilder()
+
+    # Navigation
+    if current_page > 0:
+        builder.button(text="◀️", callback_data=f"broadcast_preview_page_{current_page - 1}")
+    else:
+        builder.button(text=" ", callback_data="admin_noop")
+
+    builder.button(text=f"{current_page + 1}/{total_pages}", callback_data="admin_noop")
+
+    if current_page < total_pages - 1:
+        builder.button(text="▶️", callback_data=f"broadcast_preview_page_{current_page + 1}")
+    else:
+        builder.button(text=" ", callback_data="admin_noop")
+
+    builder.adjust(3)
+
+    # Actions
+    builder.button(text="✏️ Написать сообщение", callback_data="broadcast_write_message")
+    builder.button(text="🔙 Выбрать другую группу", callback_data="broadcast_change_group")
+    builder.button(text="❌ Отмена", callback_data="admin_broadcast_cancel")
+
+    builder.adjust(3, 1, 1, 1)
+    return builder.as_markup()
+
+
+def get_text_edit_categories_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard for text editing categories."""
+    builder = InlineKeyboardBuilder()
+
+    categories = [
+        ('👋 Приветствие', 'text_cat_welcome'),
+        ('❓ Вопросы квиза', 'text_cat_quiz'),
+        ('👤 Выбор пола', 'text_cat_gender'),
+        ('📸 Запрос фото', 'text_cat_photo'),
+        ('🔮 Предсказания', 'text_cat_predictions'),
+        ('🔘 Кнопки', 'text_cat_buttons'),
+    ]
+
+    for title, callback in categories:
+        builder.button(text=title, callback_data=callback)
+
+    builder.button(text="◀️ Назад в админку", callback_data="text_back_admin")
+    builder.adjust(1)  # One button per row
+    return builder.as_markup()
+
+
+def get_text_items_keyboard(category: str, items: list) -> InlineKeyboardMarkup:
+    """Get keyboard for selecting text item to edit."""
+    builder = InlineKeyboardBuilder()
+
+    for item_key, item_title in items:
+        builder.button(text=item_title, callback_data=f"text_item_{item_key}")
+
+    builder.button(text="◀️ Назад к категориям", callback_data="text_back_categories")
+    builder.adjust(1)  # One button per row
+    return builder.as_markup()
+
+
+def get_text_edit_back_keyboard() -> InlineKeyboardMarkup:
+    """Get keyboard with back button for text editing."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data="text_back_categories")
     return builder.as_markup()

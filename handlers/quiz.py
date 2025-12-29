@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 
 from bot.keyboards import get_quiz_keyboard
 from bot.states import QuizStates
-from bot.quiz_data import QUIZ_QUESTIONS
+from bot.quiz_data import get_quiz_questions
 from database.engine import async_session_maker
 from database.crud import QuizAnswerCRUD
 
@@ -22,12 +22,14 @@ async def send_question(message: Message, state: FSMContext, question_number: in
         await ask_gender(message, state)
         return
 
-    question_data = QUIZ_QUESTIONS[question_number]
+    # Get questions dynamically to support text editing
+    quiz_questions = get_quiz_questions()
+    question_data = quiz_questions[question_number]
     question_text = question_data["text"]
     options = question_data["options"]
 
     # Create progress indicator
-    progress = "▪️" * question_number + "▫️" * (5 - question_number)
+    progress = "⭐️" * question_number + "⚪️" * (5 - question_number)
     full_text = f"Вопрос {question_number}/5 {progress}\n\n{question_text}"
 
     await message.answer(
@@ -56,8 +58,9 @@ async def handle_quiz_answer(callback: CallbackQuery, state: FSMContext):
     question_number = int(parts[1])
     answer_index = int(parts[2])
 
-    # Get answer text
-    answer_text = QUIZ_QUESTIONS[question_number]["options"][answer_index]
+    # Get answer text (reload to get latest)
+    quiz_questions = get_quiz_questions()
+    answer_text = quiz_questions[question_number]["options"][answer_index]
 
     # Save answer to database
     user_id = callback.from_user.id

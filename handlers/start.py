@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 
 from bot.keyboards import get_start_keyboard
 from bot.states import QuizStates
+from bot.texts import TextManager
 from database.engine import async_session_maker
 from database.crud import UserCRUD
 from config import settings
@@ -36,21 +37,8 @@ async def cmd_start(message: Message, state: FSMContext):
     # Send welcome message with image
     welcome_image_path = settings.IMAGES_DIR / "welcome.jpg"
 
-    welcome_text = (
-        "<b>Новогодний квиз от СК ПРАЙД</b>\n\n"
-        "Что может делать этот бот?\n\n"
-        "Пройди новогодний фитнес-квиз, получи персональное предсказание "
-        "на 2026 год, подарок и праздничное фото!\n\n"
-        "<b>Добро пожаловать в наш новогодний фитнес-квиз!</b>\n\n"
-        "Тебя ждат 5 лёгких и весёлых вопросов о том, как ты встречаешь "
-        "Новый год, тренируешься, относишься к сладкому и находишь мотивацию.\n\n"
-        "В конце ты получишь <b>персональное фитнес-предсказание на 2026 год</b>, "
-        "а также <b>приятный бонус</b>.\n\n"
-        "<b>Важно:</b> каждый участник квиза принимает участие в большом розыгрыше "
-        "денежных сертификатов на шопинг! 30 декабря случайно выберем победителей. "
-        "Если тебе повезёт — напишем об этом сюда.\n\n"
-        "С наступающим! Пусть твой 2026 год будет ярким, успешным и энергичным!"
-    )
+    # Get welcome text from TextManager
+    welcome_text = TextManager.get('welcome.text')
 
     # Try to send image, fallback to text if image not found
     try:

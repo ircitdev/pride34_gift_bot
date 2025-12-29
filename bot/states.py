@@ -18,10 +18,15 @@ class QuizStates(StatesGroup):
 class AdminStates(StatesGroup):
     """States for admin panel flows."""
 
-    # Broadcast flow
-    broadcast_viewing_users = State()      # Paginated user list
+    # Enhanced broadcast flow
+    broadcast_select_group = State()       # Select target group
+    broadcast_preview_group = State()      # Preview selected group (paginated)
+    broadcast_personal_id_input = State()  # Input user ID for personal message
     broadcast_waiting_message = State()    # Waiting for message content
     broadcast_confirmation = State()       # Confirm before sending
+
+    # Old broadcast states (deprecated, kept for compatibility)
+    broadcast_viewing_users = State()      # Paginated user list
 
     # Winners count flow
     winners_count_menu = State()           # Show current value
@@ -32,3 +37,8 @@ class AdminStates(StatesGroup):
     date_menu = State()                    # Show current date
     date_input = State()                   # Input new date
     date_confirm = State()                 # Confirm change
+
+    # Text editing flow
+    text_edit_category = State()           # Select category to edit
+    text_edit_item = State()               # Select specific text item
+    text_edit_input = State()              # Input new text value
