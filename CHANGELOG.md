@@ -2,6 +2,79 @@
 
 Все изменения проекта Pride34 Gift Bot.
 
+## [2.4.0] - 2025-12-29
+
+### Улучшено - services/face_swapper.py
+
+**Полная переработка системы замены лиц с 5 критическими исправлениями**
+
+#### 1. Исправлен padding расчёт в _extract_face_region()
+- **БЫЛО:** Некорректный расчёт с потерей padding у края изображения
+- **СТАЛО:** Корректный расчёт x_start/y_start/x_end/y_end
+- **Результат:** Лица правильно центрированы даже у края фото
+
+#### 2. Добавлено сохранение пропорций в _seamless_blend_faces()
+- **БЫЛО:** Искажение aspect ratio (квадратная экспансия)
+- **СТАЛО:** Динамический расчёт высоты на основе ширины и aspect ratio
+- **Результат:** Круглые лица остаются круглыми, вытянутые - вытянутыми
+
+#### 3. Улучшена цветокоррекция в _fallback_blend()
+- **БЫЛО:** Простая коррекция mean в LAB пространстве
+- **СТАЛО:** Коррекция mean + std (стандартное отклонение)
+- **Метод:** Взят из template_generator.py (проверенный алгоритм)
+- **Результат:** Лучшая адаптация к освещению сцены
+
+#### 4. Добавлен profile detection
+- **Добавлено:** haarcascade_profileface.xml cascade
+- **Логика:** Frontal detection → Profile fallback
+- **Результат:** Лучшее покрытие лиц под углом
+
+#### 5. Добавлен Seamless Cloning (Poisson Blending)
+- **Главное улучшение:** cv2.seamlessClone для реалистичного смешивания
+- **Алгоритм:** Poisson Blending (gradient-domain editing)
+- **Режим:** cv2.NORMAL_CLONE для полной замены
+- **Fallback:** Улучшенный manual blend при сбое seamlessClone
+- **Результат:** Автоматическая интеграция освещения, незаметные швы
+
+### Архитектура
+
+**Новые методы:**
+- `_seamless_blend_faces()` - основной метод с Poisson Blending
+- `_fallback_blend()` - резервный метод с улучшенной цветокоррекцией
+
+**Обновлённые методы:**
+- `_extract_face_region()` - исправлен padding + profile cascade
+- `_detect_face_region()` - добавлен profile cascade fallback
+- `swap_face()` - улучшенная обработка ошибок, JPEG quality 95
+
+### Тестирование
+
+```bash
+python test_face_swapper.py
+✅ FaceSwapper initialized
+✅ Frontal cascade loaded: True
+✅ Profile cascade loaded: True
+✅ SUCCESS! Output: generated_photos/test_face_swap.jpg
+✅ Size: 198.7 KB
+```
+
+### Деплой
+- ✅ Файл загружен: `services/face_swapper.py` (282 строки)
+- ✅ Сервис перезапущен: `pride34-gift-bot.service`
+- ✅ Статус: Active (running)
+- ✅ PID: 2226192
+- ✅ Memory: 106.0M
+
+### Новые файлы
+- `test_face_swapper.py` - тестовый скрипт
+- `FACE_SWAPPER_IMPROVEMENTS.md` - подробная документация
+
+### Важное замечание
+Face Swapper предназначен для работы с **реальными фотографиями** (фото + фото).
+Для 3D шаблонов используется `template_generator.py` (уже улучшен в v2.3.2).
+
+---
+
 ## [2.3.2] - 2025-12-29
 
 ### Исправлено
