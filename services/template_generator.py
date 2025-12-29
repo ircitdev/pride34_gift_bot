@@ -77,8 +77,8 @@ class TemplateGenerator:
         user_id: int
     ) -> Path:
         """
-        Generate personalized image using pre-made 3D template.
-        Randomly selects from available templates in new_templates directory.
+        Generate personalized image using pre-made 3D template (async wrapper).
+        Выносит тяжелые CPU/IO операции в отдельный поток для неблокирующего выполнения.
 
         Args:
             user_photo_path: Path to user's photo
@@ -87,6 +87,26 @@ class TemplateGenerator:
 
         Returns:
             Path to generated image
+        """
+        import asyncio
+        from functools import partial
+
+        # Запускаем синхронную обработку в executor (ThreadPoolExecutor)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,  # Использует default ThreadPoolExecutor
+            partial(self._generate_sync, user_photo_path, gender, user_id)
+        )
+
+    def _generate_sync(
+        self,
+        user_photo_path: Path,
+        gender: str,
+        user_id: int
+    ) -> Path:
+        """
+        Synchronous implementation of template generation.
+        Performs actual CPU/IO intensive work without blocking event loop.
         """
         try:
             # Use random template selection from new_templates
@@ -151,16 +171,18 @@ class TemplateGenerator:
         # Get largest face
         x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
 
-        # Add MORE padding for better face framing (includes hair and neck)
+        # Add padding for better face framing (includes hair and neck)
         padding_w = int(w * 0.5)  # 50% horizontal padding
         padding_h = int(h * 0.6)  # 60% vertical padding for hair/neck
 
-        x = max(0, x - padding_w)
-        y = max(0, y - padding_h)
-        w = min(img.shape[1] - x, w + 2 * padding_w)
-        h = min(img.shape[0] - y, h + 2 * padding_h)
+        # Расширяем регион с КОРРЕКТНЫМ учетом границ
+        # (исправлено: теперь лицо центрируется правильно даже у края)
+        x_start = max(0, x - padding_w)
+        y_start = max(0, y - padding_h)
+        x_end = min(img.shape[1], x + w + padding_w)
+        y_end = min(img.shape[0], y + h + padding_h)
 
-        return img[y:y+h, x:x+w]
+        return img[y_start:y_end, x_start:x_end]
 
     def _center_crop(self, img: np.ndarray) -> np.ndarray:
         """Fallback: center crop of image."""
@@ -179,15 +201,14 @@ class TemplateGenerator:
         """
         h, w = template.shape[:2]
 
-        # Голова КРУГЛАЯ - ширина ≈ высоте
-        # Размер ~17% от ширины шаблона для обоих измерений
-        head_size = int(w * 0.17)  # 17% ширины (на 765px = ~130px)
-        head_width = head_size
-        head_height = head_size  # Квадрат для круглой головы!
+        # Синхронизировано с visualize_face_region.py
+        # Размеры для естественной круглой головы
+        head_width = int(w * 0.20)   # 20% ширины шаблона (было 0.17)
+        head_height = int(w * 0.23)  # 23% ширины для учета волос (было 0.17)
 
-        # Position - центр по горизонтали, 11% от верха (чтобы совпала с шеей)
+        # Position - центр по горизонтали, 14% от верха (было 11%)
         x = (w - head_width) // 2  # Центр по горизонтали
-        y = int(h * 0.11)  # 11% от верха - ниже для лучшего совпадения с шеей
+        y = int(h * 0.14)  # 14% от верха - оптимальная позиция
 
         logger.info(f"Template size: {w}x{h}, Face region: x={x}, y={y}, w={head_width}, h={head_height}")
 
@@ -204,7 +225,21 @@ class TemplateGenerator:
         """
         x, y, w, h = face_region
 
-        # Resize user face to template head size
+        # Проверка границ шаблона (защита от краша)
+        template_h, template_w = template.shape[:2]
+
+        # Обрезаем регион если выходит за границы
+        actual_h = min(h, template_h - y)
+        actual_w = min(w, template_w - x)
+
+        if actual_h != h or actual_w != w:
+            logger.warning(
+                f"Face region {w}x{h} at ({x},{y}) exceeds template bounds "
+                f"{template_w}x{template_h}, adjusting to {actual_w}x{actual_h}"
+            )
+            w, h = actual_w, actual_h
+
+        # Resize user face to ACTUAL region size (теперь гарантированно безопасно)
         face_resized = cv2.resize(user_face, (w, h), interpolation=cv2.INTER_LANCZOS4)
 
         # Color matching - match scene lighting
@@ -276,7 +311,7 @@ class TemplateGenerator:
 
             # Resize logo
             logo_width = int(img.shape[1] * 0.25)
-            aspect = logo.shape[0] / logo.shape[0]
+            aspect = logo.shape[0] / logo.shape[1]  # Исправлено: высота / ширина
             logo_height = int(logo_width * aspect)
             logo = cv2.resize(logo, (logo_width, logo_height))
 
