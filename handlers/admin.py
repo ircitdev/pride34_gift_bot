@@ -21,9 +21,12 @@ from bot.keyboards import (
     get_date_menu_keyboard,
     get_date_confirm_keyboard,
     get_broadcast_group_select_keyboard,
-    get_broadcast_preview_keyboard
+    get_broadcast_preview_keyboard,
+    get_certificate_users_keyboard,
+    get_certificate_confirm_keyboard,
+    get_certificate_after_send_keyboard
 )
-from bot.states import AdminStates
+from bot.states import AdminStates, CertificateStates
 from database.engine import async_session_maker
 from database.crud import UserCRUD, QuizAnswerCRUD
 from config import settings
@@ -34,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 USERS_PER_PAGE = 10
+CERTIFICATE_USERS_PER_PAGE = 10
 
 # Group names for broadcast
 GROUP_NAMES = {
@@ -936,4 +940,290 @@ async def cancel_broadcast_flow(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.delete()
     await callback.message.answer("❌ Рассылка отменена")
+    await state.clear()
+
+
+# ============================================================================
+# CERTIFICATE HANDLERS
+# ============================================================================
+
+@router.message(F.text == "Выдать сертификат")
+async def start_certificate_flow(message: Message, state: FSMContext):
+    """Start certificate issuance flow."""
+    logger.info(f"📜 CERTIFICATE: Button clicked by user {message.from_user.id}")
+
+    if not is_admin(message.from_user.id):
+        logger.warning(f"📜 CERTIFICATE: User {message.from_user.id} is not admin, ignoring")
+        return
+
+    logger.info(f"📜 CERTIFICATE: Getting completed users from database")
+    async with async_session_maker() as session:
+        users = await UserCRUD.get_users_by_filter(session, 'completed')
+
+    logger.info(f"📜 CERTIFICATE: Found {len(users)} completed users")
+
+    if not users:
+        await message.answer(
+            "❌ Нет пользователей, получивших открытку.\n\n"
+            "Сертификаты можно выдавать только тем, кто завершил квиз."
+        )
+        return
+
+    users.sort(key=lambda u: u.created_at, reverse=True)
+    total_pages = math.ceil(len(users) / CERTIFICATE_USERS_PER_PAGE)
+
+    await state.update_data(
+        certificate_users=[u.id for u in users],
+        certificate_current_page=0,
+        certificate_total_pages=total_pages
+    )
+
+    await show_certificate_user_page(message, state, 0)
+    await state.set_state(CertificateStates.viewing_users)
+
+
+async def show_certificate_user_page(message: Message, state: FSMContext, page: int):
+    """Display a page of users for certificate issuance."""
+    data = await state.get_data()
+    user_ids = data.get("certificate_users", [])
+    total_pages = data.get("certificate_total_pages", 1)
+
+    start_idx = page * CERTIFICATE_USERS_PER_PAGE
+    end_idx = start_idx + CERTIFICATE_USERS_PER_PAGE
+    page_user_ids = user_ids[start_idx:end_idx]
+
+    async with async_session_maker() as session:
+        users = []
+        for uid in page_user_ids:
+            user = await UserCRUD.get(session, uid)
+            if user:
+                users.append(user)
+
+    text = (
+        f"📜 <b>Выдача сертификатов</b>\n\n"
+        f"Страница {page + 1}/{total_pages}\n"
+        f"Всего получателей: {len(user_ids)}\n\n"
+        f"Выберите пользователя для отправки сертификата:"
+    )
+
+    keyboard = get_certificate_users_keyboard(users, page, total_pages)
+
+    try:
+        await message.edit_text(text=text, reply_markup=keyboard)
+    except:
+        await message.answer(text=text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith("cert_page_"), CertificateStates.viewing_users)
+async def handle_certificate_pagination(callback: CallbackQuery, state: FSMContext):
+    """Handle pagination."""
+    await callback.answer()
+    page = int(callback.data.split("_")[-1])
+    await state.update_data(certificate_current_page=page)
+    await show_certificate_user_page(callback.message, state, page)
+
+
+@router.callback_query(F.data.startswith("cert_select_"), CertificateStates.viewing_users)
+async def handle_certificate_user_selection(callback: CallbackQuery, state: FSMContext):
+    """Handle user selection."""
+    logger.info(f"📜 CERTIFICATE: User selected by admin {callback.from_user.id}, callback_data={callback.data}")
+    await callback.answer()
+    user_id = int(callback.data.split("_")[-1])
+    logger.info(f"📜 CERTIFICATE: Parsed user_id: {user_id}")
+
+    async with async_session_maker() as session:
+        user = await UserCRUD.get(session, user_id)
+
+    if not user:
+        logger.error(f"📜 CERTIFICATE: User {user_id} not found")
+        await callback.message.edit_text("❌ Пользователь не найден")
+        await state.clear()
+        return
+
+    logger.info(f"📜 CERTIFICATE: Saving user_id {user_id} to state")
+    await state.update_data(certificate_selected_user_id=user_id)
+
+    if user.full_name and user.full_name.strip():
+        user_name = user.full_name
+    elif user.username:
+        user_name = f"@{user.username}"
+    else:
+        user_name = f"User {user_id}"
+
+    expiry_date = settings.QUIZ_END_DATE
+
+    confirm_text = (
+        f"📜 <b>Подтверждение отправки</b>\n\n"
+        f"Отправить сертификат пользователю:\n"
+        f"<b>{user_name}</b>\n\n"
+        f"Действующий до: <code>{expiry_date}</code>\n\n"
+        f"Продолжить?"
+    )
+
+    await callback.message.edit_text(
+        text=confirm_text,
+        reply_markup=get_certificate_confirm_keyboard()
+    )
+    logger.info(f"📜 CERTIFICATE: Setting state to confirming_send")
+    await state.set_state(CertificateStates.confirming_send)
+    logger.info(f"📜 CERTIFICATE: State set to confirming_send")
+
+
+@router.callback_query(F.data == "cert_confirm_yes", CertificateStates.confirming_send)
+async def handle_certificate_confirm_yes(callback: CallbackQuery, state: FSMContext):
+    """Handle confirmed sending."""
+    logger.info(f"📜 CERTIFICATE: Confirm YES clicked by admin {callback.from_user.id}")
+    await callback.answer()
+
+    data = await state.get_data()
+    user_id = data.get("certificate_selected_user_id")
+    logger.info(f"📜 CERTIFICATE: Selected user_id from state: {user_id}")
+
+    if not user_id:
+        logger.error(f"📜 CERTIFICATE: No user_id in state!")
+        await callback.message.edit_text("❌ Ошибка: пользователь не выбран")
+        await state.clear()
+        return
+
+    logger.info(f"📜 CERTIFICATE: Getting user {user_id} from database")
+    async with async_session_maker() as session:
+        user = await UserCRUD.get(session, user_id)
+
+    if not user:
+        logger.error(f"📜 CERTIFICATE: User {user_id} not found in database")
+        await callback.message.edit_text("❌ Пользователь не найден")
+        await state.clear()
+        return
+
+    logger.info(f"📜 CERTIFICATE: Starting generation for user {user_id}")
+    await callback.message.edit_text("⏳ Генерирую сертификат...\n\nЭто может занять несколько секунд.")
+    await state.set_state(CertificateStates.sending)
+
+    try:
+        from services.certificate_generator import CertificateGenerator
+        from aiogram.types import FSInputFile
+
+        generator = CertificateGenerator()
+
+        if user.full_name and user.full_name.strip():
+            certificate_name = user.full_name
+        elif user.username:
+            certificate_name = user.username
+        else:
+            certificate_name = f"User {user_id}"
+
+        certificate_path = await generator.generate_certificate(
+            user_id=user_id,
+            user_name=certificate_name,
+            expiry_date=settings.QUIZ_END_DATE
+        )
+
+        cert_file = FSInputFile(certificate_path)
+
+        await callback.bot.send_photo(
+            chat_id=user_id,
+            photo=cert_file,
+            caption=(
+                f"🎉 <b>Поздравляем!</b>\n\n"
+                f"Вы получили сертификат от СК ПРАЙД!\n\n"
+                f"Действителен до: <code>{settings.QUIZ_END_DATE}</code>"
+            )
+        )
+
+        if user.forum_topic_id:
+            await callback.bot.send_photo(
+                chat_id=settings.FORUM_GROUP_ID,
+                message_thread_id=user.forum_topic_id,
+                photo=cert_file,
+                caption=(
+                    f"📜 <b>Сертификат отправлен</b>\n\n"
+                    f"Действителен до: {settings.QUIZ_END_DATE}"
+                )
+            )
+            logger.info(f"Certificate sent to forum topic {user.forum_topic_id}")
+
+        success_text = (
+            f"✅ <b>Сертификат отправлен!</b>\n\n"
+            f"Получатель: {certificate_name}\n"
+            f"ID: <code>{user_id}</code>\n\n"
+            f"Что дальше?"
+        )
+
+        await callback.message.edit_text(
+            text=success_text,
+            reply_markup=get_certificate_after_send_keyboard()
+        )
+
+        logger.info(f"Admin {callback.from_user.id} sent certificate to user {user_id}")
+
+    except Exception as e:
+        logger.error(f"Error sending certificate to user {user_id}: {e}")
+
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при отправке сертификата</b>\n\n"
+            f"Детали: {str(e)}\n\n"
+            f"Попробуйте снова или проверьте логи.",
+            reply_markup=get_certificate_after_send_keyboard()
+        )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "cert_confirm_yes")
+async def handle_certificate_confirm_yes_fallback(callback: CallbackQuery, state: FSMContext):
+    """Handle YES button WITHOUT state filter (fallback)."""
+    logger.warning(f"📜 CERTIFICATE: YES button fallback handler triggered! State filter didn't work.")
+    current_state = await state.get_state()
+    logger.warning(f"📜 CERTIFICATE: Current state: {current_state}")
+    # Call the main handler
+    await handle_certificate_confirm_yes(callback, state)
+
+
+@router.callback_query(F.data == "cert_confirm_no")
+async def handle_certificate_confirm_no(callback: CallbackQuery, state: FSMContext):
+    """Handle cancelled sending."""
+    logger.info(f"📜 CERTIFICATE: NO button clicked by admin {callback.from_user.id}")
+    await callback.answer()
+    data = await state.get_data()
+    current_page = data.get("certificate_current_page", 0)
+    await show_certificate_user_page(callback.message, state, current_page)
+    await state.set_state(CertificateStates.viewing_users)
+
+
+@router.callback_query(F.data == "cert_send_another")
+async def handle_certificate_send_another(callback: CallbackQuery, state: FSMContext):
+    """Handle 'Send another' button."""
+    await callback.answer()
+    await callback.message.delete()
+
+    # Restart the flow
+    async with async_session_maker() as session:
+        users = await UserCRUD.get_users_by_filter(session, 'completed')
+
+    if not users:
+        await callback.message.answer(
+            "❌ Нет пользователей, получивших открытку.\n\n"
+            "Сертификаты можно выдавать только тем, кто завершил квиз."
+        )
+        return
+
+    users.sort(key=lambda u: u.created_at, reverse=True)
+    total_pages = math.ceil(len(users) / CERTIFICATE_USERS_PER_PAGE)
+
+    await state.update_data(
+        certificate_users=[u.id for u in users],
+        certificate_current_page=0,
+        certificate_total_pages=total_pages
+    )
+
+    await show_certificate_user_page(callback.message, state, 0)
+    await state.set_state(CertificateStates.viewing_users)
+
+
+@router.callback_query(F.data == "cert_exit")
+async def handle_certificate_exit(callback: CallbackQuery, state: FSMContext):
+    """Handle exit."""
+    await callback.answer()
+    await callback.message.delete()
+    await callback.message.answer("✅ Выдача сертификатов завершена", reply_markup=get_admin_keyboard())
     await state.clear()

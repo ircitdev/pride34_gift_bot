@@ -21,14 +21,48 @@ logger = logging.getLogger(__name__)
 
 async def ask_gender(message: Message, state: FSMContext):
     """Ask user to select gender."""
+    user_id = message.from_user.id
+    logger.info(f"👤 ASK_GENDER: Starting for user {user_id}")
+
     # Get text from TextManager
     text = TextManager.get('gender.text')
+    logger.info(f"👤 ASK_GENDER: Got text from TextManager")
 
-    await message.answer(
-        text=text,
-        reply_markup=get_gender_keyboard()
-    )
+    try:
+        await message.answer(
+            text=text,
+            reply_markup=get_gender_keyboard()
+        )
+        logger.info(f"✅ ASK_GENDER: Gender selection sent to user {user_id}")
+    except Exception as e:
+        logger.error(f"❌ ASK_GENDER: Error sending gender selection: {e}", exc_info=True)
+        raise
+
     await state.set_state(QuizStates.waiting_for_gender)
+    logger.info(f"✅ ASK_GENDER: State set to waiting_for_gender")
+
+
+async def ask_gender_from_callback(callback: CallbackQuery, state: FSMContext):
+    """Ask user to select gender (from callback after quiz)."""
+    user_id = callback.from_user.id
+    logger.info(f"👤 ASK_GENDER_FROM_CALLBACK: Starting for user {user_id}")
+
+    # Get text from TextManager
+    text = TextManager.get('gender.text')
+    logger.info(f"👤 ASK_GENDER_FROM_CALLBACK: Got text from TextManager")
+
+    try:
+        await callback.message.answer(
+            text=text,
+            reply_markup=get_gender_keyboard()
+        )
+        logger.info(f"✅ ASK_GENDER_FROM_CALLBACK: Gender selection sent to user {user_id}")
+    except Exception as e:
+        logger.error(f"❌ ASK_GENDER_FROM_CALLBACK: Error sending gender selection: {e}", exc_info=True)
+        raise
+
+    await state.set_state(QuizStates.waiting_for_gender)
+    logger.info(f"✅ ASK_GENDER_FROM_CALLBACK: State set to waiting_for_gender")
 
 
 @router.callback_query(F.data.startswith("gender_"))
@@ -60,89 +94,159 @@ async def handle_gender_selection(callback: CallbackQuery, state: FSMContext):
 async def handle_photo_upload(message: Message, state: FSMContext):
     """Handle photo upload from user."""
     user_id = message.from_user.id
+    logger.info(f"📸 PHOTO HANDLER: Started for user {user_id}")
 
-    # Get the largest photo
-    photo = message.photo[-1]
-    file_id = photo.file_id
+    # Check current state
+    current_state = await state.get_state()
+    logger.info(f"📸 PHOTO HANDLER: Current state = {current_state}")
 
-    # Download photo
-    file_info = await message.bot.get_file(file_id)
-    file_path = settings.USER_PHOTOS_DIR / f"{user_id}.jpg"
+    try:
+        # Get the largest photo
+        photo = message.photo[-1]
+        file_id = photo.file_id
+        logger.info(f"📸 PHOTO HANDLER: Got photo file_id: {file_id}")
 
-    await message.bot.download_file(file_info.file_path, file_path)
-    logger.info(f"User {user_id} uploaded photo, saved to {file_path}")
+        # Download photo
+        file_info = await message.bot.get_file(file_id)
+        file_path = settings.USER_PHOTOS_DIR / f"{user_id}.jpg"
+        logger.info(f"📸 PHOTO HANDLER: Downloading to {file_path}")
+
+        await message.bot.download_file(file_info.file_path, file_path)
+        logger.info(f"📸 PHOTO HANDLER: Photo downloaded successfully to {file_path}")
+    except Exception as download_error:
+        logger.error(f"❌ PHOTO HANDLER: Download error: {download_error}", exc_info=True)
+        await message.answer("Произошла ошибка при загрузке фото. Попробуйте еще раз.")
+        return
 
     # Check if face is detected in photo
-    import cv2
-    img = cv2.imread(str(file_path))
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+    logger.info(f"🔍 PHOTO HANDLER: Starting face detection")
+    try:
+        import cv2
+        img = cv2.imread(str(file_path))
 
-    if len(faces) == 0:
-        await message.answer(
-            "❌ К сожалению, на вашем фото не обнаружено лицо.\n\n"
-            "Пожалуйста, отправьте фото где:\n"
-            "• Видно ваше лицо\n"
-            "• Вы смотрите в камеру\n"
-            "• Хорошее освещение\n"
-            "• Вы один в кадре"
-        )
-        file_path.unlink()  # Delete invalid photo
+        if img is None:
+            logger.error(f"❌ PHOTO HANDLER: Failed to read image file {file_path}")
+            await message.answer("Произошла ошибка при обработке фото. Попробуйте отправить другое фото.")
+            file_path.unlink()
+            return
+
+        logger.info(f"🔍 PHOTO HANDLER: Image loaded, shape: {img.shape}")
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+
+        logger.info(f"🔍 PHOTO HANDLER: Detected {len(faces)} face(s)")
+
+        if len(faces) == 0:
+            logger.warning(f"⚠️ PHOTO HANDLER: No faces detected, asking user to resend")
+            await message.answer(
+                "❌ К сожалению, на вашем фото не обнаружено лицо.\n\n"
+                "Пожалуйста, отправьте фото где:\n"
+                "• Видно ваше лицо\n"
+                "• Вы смотрите в камеру\n"
+                "• Хорошее освещение\n"
+                "• Вы один в кадре"
+            )
+            file_path.unlink()  # Delete invalid photo
+            return
+    except Exception as face_error:
+        logger.error(f"❌ PHOTO HANDLER: Face detection error: {face_error}", exc_info=True)
+        await message.answer("Произошла ошибка при обработке фото. Попробуйте отправить другое фото.")
+        if file_path.exists():
+            file_path.unlink()
         return
 
     # Save photo info to database
-    async with async_session_maker() as session:
-        await UserPhotoCRUD.add_photo(
-            session,
-            user_id=user_id,
-            file_id=file_id,
-            file_path=str(file_path)
-        )
-        await UserCRUD.update_photo_status(session, user_id, uploaded=True)
+    logger.info(f"💾 PHOTO HANDLER: Saving photo info to database")
+    try:
+        async with async_session_maker() as session:
+            await UserPhotoCRUD.add_photo(
+                session,
+                user_id=user_id,
+                file_id=file_id,
+                file_path=str(file_path)
+            )
+            await UserCRUD.update_photo_status(session, user_id, uploaded=True)
+        logger.info(f"✅ PHOTO HANDLER: Photo info saved to database")
+    except Exception as db_error:
+        logger.error(f"❌ PHOTO HANDLER: Database error: {db_error}", exc_info=True)
+        await message.answer("Произошла ошибка при сохранении данных. Попробуйте еще раз.")
+        return
 
-    # Send processing message
+    # Send processing message with hourglass animation
+    logger.info(f"⏳ PHOTO HANDLER: Sending processing message")
     processing_msg = await message.answer(
-        "Колдуем над твоим новогодним образом ✨\n\n"
+        "⏳ Колдуем над твоим новогодним образом ✨\n\n"
         "Ещё пару мгновений — и всё будет готово"
     )
 
     # Get user data
+    logger.info(f"📋 PHOTO HANDLER: Getting user data from state")
     data = await state.get_data()
     gender = data.get("gender", "male")
     answers = data.get("answers", [])
+    logger.info(f"📋 PHOTO HANDLER: Gender={gender}, Answers count={len(answers)}")
 
-    # Process image
+    # Process image with periodic chat action updates
+    logger.info(f"🎨 PHOTO HANDLER: Starting image generation")
+    import asyncio
+
+    async def send_typing_periodically():
+        """Send typing action every 4 seconds to keep animation alive"""
+        while True:
+            try:
+                await message.bot.send_chat_action(chat_id=message.chat.id, action="upload_photo")
+                await asyncio.sleep(4)
+            except:
+                break
+
+    typing_task = asyncio.create_task(send_typing_periodically())
+
     try:
         processor = ImageProcessor()
+        logger.info(f"🎨 PHOTO HANDLER: ImageProcessor created, calling create_christmas_figure")
         generated_path = await processor.create_christmas_figure(
             user_photo_path=file_path,
             gender=gender,
             user_id=user_id
         )
+        typing_task.cancel()  # Stop typing animation
+        logger.info(f"✅ PHOTO HANDLER: Image generated successfully: {generated_path}")
 
         # Update database with generated path
+        logger.info(f"💾 PHOTO HANDLER: Updating database with generated path")
         async with async_session_maker() as session:
             await UserPhotoCRUD.update_generated_path(session, user_id, str(generated_path))
             await UserCRUD.update_quiz_status(session, user_id, completed=True)
+        logger.info(f"✅ PHOTO HANDLER: Database updated")
 
         # Delete processing message
+        logger.info(f"🗑️ PHOTO HANDLER: Deleting processing message")
         await processing_msg.delete()
 
         # Send result to user
+        logger.info(f"📤 PHOTO HANDLER: Sending final result to user")
         await send_final_result(message, state, generated_path, answers)
+        logger.info(f"✅ PHOTO HANDLER: Final result sent")
 
         # Create forum topic with user data
+        logger.info(f"📝 PHOTO HANDLER: Creating forum topic")
         try:
             # Get user data with pride_gift_id and referrer info
+            logger.info(f"📝 PHOTO HANDLER: Getting user data for forum topic")
             async with async_session_maker() as session:
                 user = await UserCRUD.get(session, user_id)
+                if not user:
+                    logger.error(f"User {user_id} not found in database")
+                    raise ValueError(f"User {user_id} not found")
+
                 # Get quiz answers from database (text, not indices)
                 quiz_answers_db = await QuizAnswerCRUD.get_user_answers(session, user_id)
                 quiz_answers_text = [qa.answer for qa in quiz_answers_db]
 
                 # Get referrer information if exists
-                referrer_id = user.referrer_id
+                referrer_id = user.referrer_id if user.referrer_id else None
                 referrer_topic_id = None
                 referrer_pride_gift_id = None
 
@@ -181,17 +285,25 @@ async def handle_photo_upload(message: Message, state: FSMContext):
             logger.error(f"Error creating forum topic for user {user_id}: {forum_error}")
 
     except Exception as e:
-        logger.error(f"Error processing image for user {user_id}: {e}")
-        await processing_msg.delete()
+        typing_task.cancel()  # Stop typing animation on error
+        logger.error(f"❌ PHOTO HANDLER: Error processing image for user {user_id}: {e}", exc_info=True)
+        try:
+            await processing_msg.delete()
+        except:
+            pass
         await message.answer(
             "Произошла ошибка при обработке фото. Попробуйте отправить другое фото."
         )
+        logger.info(f"❌ PHOTO HANDLER: Error message sent to user")
 
 
 async def send_final_result(message: Message, state: FSMContext, image_path: Path, answers: list):
     """Send final result with prediction and generated image."""
+    logger.info(f"📊 SEND_FINAL_RESULT: Starting for user {message.from_user.id}")
+
     # Get prediction
     prediction = get_prediction(answers)
+    logger.info(f"📊 SEND_FINAL_RESULT: Prediction generated")
 
     # Prepare final message
     final_text = (
@@ -219,6 +331,7 @@ async def send_final_result(message: Message, state: FSMContext, image_path: Pat
     has_premium = message.from_user.is_premium or False
 
     # Send photo with text
+    logger.info(f"📤 SEND_FINAL_RESULT: Sending photo to user")
     try:
         photo = FSInputFile(image_path)
         await message.answer_photo(
@@ -226,14 +339,18 @@ async def send_final_result(message: Message, state: FSMContext, image_path: Pat
             caption=final_text,
             reply_markup=get_share_keyboard(bot_username, user_id, has_premium)
         )
+        logger.info(f"✅ SEND_FINAL_RESULT: Photo sent successfully")
     except Exception as e:
-        logger.error(f"Error sending final result: {e}")
+        logger.error(f"❌ SEND_FINAL_RESULT: Error sending photo: {e}", exc_info=True)
+        logger.info(f"📤 SEND_FINAL_RESULT: Sending as text message instead")
         await message.answer(
             text=final_text,
             reply_markup=get_share_keyboard(bot_username, user_id, has_premium)
         )
 
+    logger.info(f"✅ SEND_FINAL_RESULT: Setting state to completed")
     await state.set_state(QuizStates.completed)
+    logger.info(f"✅ SEND_FINAL_RESULT: Complete")
 
 
 @router.message(QuizStates.waiting_for_photo)
@@ -335,7 +452,7 @@ async def handle_instagram_story_share(callback: CallbackQuery):
 
     # Get user's generated photo from database
     async with async_session_maker() as session:
-        photo = await UserPhotoCRUD.get(session, user_id)
+        photo = await UserPhotoCRUD.get_photo(session, user_id)
         if not photo or not photo.generated_path:
             await callback.answer("Открытка не найдена. Пройдите квиз заново.", show_alert=True)
             return
@@ -372,7 +489,7 @@ async def handle_vk_story_share(callback: CallbackQuery):
 
     # Get user's generated photo
     async with async_session_maker() as session:
-        photo = await UserPhotoCRUD.get(session, user_id)
+        photo = await UserPhotoCRUD.get_photo(session, user_id)
         if not photo or not photo.generated_path:
             await callback.answer("Открытка не найдена. Пройдите квиз заново.", show_alert=True)
             return
@@ -416,7 +533,7 @@ async def handle_telegram_story_share(callback: CallbackQuery):
 
     # Get user's generated photo
     async with async_session_maker() as session:
-        photo = await UserPhotoCRUD.get(session, user_id)
+        photo = await UserPhotoCRUD.get_photo(session, user_id)
         if not photo or not photo.generated_path:
             await callback.answer("Открытка не найдена. Пройдите квиз заново.", show_alert=True)
             return

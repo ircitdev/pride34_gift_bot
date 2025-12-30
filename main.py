@@ -11,9 +11,20 @@ from handlers import start, quiz, photo, admin, forum_communication, user_replie
 
 
 # Configure logging
+from pathlib import Path
+
+# Create logs directory
+logs_dir = Path("logs")
+logs_dir.mkdir(exist_ok=True)
+
+# Configure logging to both file and console
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(logs_dir / "bot.log", encoding='utf-8'),
+        logging.StreamHandler()  # Also output to console
+    ]
 )
 logger = logging.getLogger(__name__)
 

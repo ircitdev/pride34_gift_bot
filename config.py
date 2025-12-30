@@ -30,8 +30,20 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     AI_GENERATION_ENABLED: bool = True
 
+    # Google Gemini API Settings (официальный API)
+    NANO_BANANA_API_KEY: str = ""
+    NANO_BANANA_URL: str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+
     # Forum Group
     FORUM_GROUP_ID: int = 0
+
+    # Certificate Settings
+    CERTIFICATE_NAME_X: int = 286      # X координата имени (центр: 572/2)
+    CERTIFICATE_NAME_Y: int = 780      # Y координата имени (+10px от 770)
+    CERTIFICATE_DATE_X: int = 286      # X координата даты (центр: 572/2)
+    CERTIFICATE_DATE_Y: int = 875      # Y координата даты (+35px от 840)
+    CERTIFICATE_FONT_SIZE: int = 30    # Размер шрифта (Roboto Regular 30px)
+    CERTIFICATE_FONT_COLOR: str = "255,255,255"  # Цвет текста RGB (белый)
 
     model_config = SettingsConfigDict(
         env_file=".env",

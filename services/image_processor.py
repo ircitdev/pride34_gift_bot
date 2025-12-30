@@ -61,28 +61,19 @@ class ImageProcessor:
         Returns:
             Path to generated image
         """
-        # Strategy 1: Professional Templates (Priority 1)
-        try:
-            logger.info(f"Attempting Strategy 1 (Templates) for user {user_id}")
-            return await self.template_generator.generate_from_template(
-                user_photo_path, gender, user_id
-            )
-        except FileNotFoundError as e:
-            logger.warning(f"Strategy 1 failed (templates not found): {e}")
-        except Exception as e:
-            logger.warning(f"Strategy 1 failed: {e}")
-
-        # Strategy 2: AI Generation (Priority 2)
+        # AI Generation (ONLY METHOD) - Gemini 2.0 + DALL-E 3
+        # Templates are DISABLED per user request
         if settings.AI_GENERATION_ENABLED and settings.OPENAI_API_KEY:
             try:
-                logger.info(f"Attempting Strategy 2 (AI) for user {user_id}")
+                logger.info(f"🎨 Using AI Generation (Gemini 2.0 + DALL-E 3) for user {user_id}")
                 return await self._generate_via_ai(user_photo_path, gender, user_id)
             except Exception as e:
-                logger.error(f"Strategy 2 failed: {e}")
-
-        # Strategy 3: Fallback (Basic PIL Composition)
-        logger.info(f"Using Strategy 3 (Fallback) for user {user_id}")
-        return await self._generate_fallback(user_photo_path, gender, user_id)
+                logger.error(f"❌ AI Generation failed: {e}", exc_info=True)
+                # Re-raise exception to show user there was an error
+                raise Exception(f"Не удалось сгенерировать открытку. Попробуйте другое фото.") from e
+        else:
+            logger.error(f"⚠️ AI generation is disabled or API key is missing!")
+            raise Exception("AI генерация отключена. Обратитесь к администратору.")
 
     async def _generate_via_ai(self, user_photo_path: Path, gender: str, user_id: int) -> Path:
         """
@@ -96,14 +87,9 @@ class ImageProcessor:
         Returns:
             Path to generated image
         """
-        base_image = await self.ai_generator.generate_figurine(
+        # AI генерирует готовую фигурку (face swap ОТКЛЮЧЕН)
+        final_image = await self.ai_generator.generate_figurine(
             user_photo_path, gender, user_id
-        )
-
-        output_path = settings.GENERATED_PHOTOS_DIR / f"{user_id}_christmas.jpg"
-
-        final_image = await self.face_swapper.swap_face(
-            base_image, user_photo_path, output_path
         )
         return final_image
 

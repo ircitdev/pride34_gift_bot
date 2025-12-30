@@ -42,3 +42,11 @@ class AdminStates(StatesGroup):
     text_edit_category = State()           # Select category to edit
     text_edit_item = State()               # Select specific text item
     text_edit_input = State()              # Input new text value
+
+
+class CertificateStates(StatesGroup):
+    """States for certificate issuance flow."""
+
+    viewing_users = State()      # Просмотр списка с пагинацией
+    confirming_send = State()    # Подтверждение отправки
+    sending = State()            # Процесс отправки

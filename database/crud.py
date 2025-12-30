@@ -182,13 +182,28 @@ class QuizAnswerCRUD:
 
     @staticmethod
     async def add_answer(session: AsyncSession, user_id: int, question_number: int, answer: str):
-        """Add quiz answer."""
-        quiz_answer = QuizAnswer(
-            user_id=user_id,
-            question_number=question_number,
-            answer=answer
+        """Add quiz answer. If answer for this question already exists, update it."""
+        # Check if answer already exists
+        result = await session.execute(
+            select(QuizAnswer).where(
+                QuizAnswer.user_id == user_id,
+                QuizAnswer.question_number == question_number
+            )
         )
-        session.add(quiz_answer)
+        existing_answer = result.scalar_one_or_none()
+
+        if existing_answer:
+            # Update existing answer
+            existing_answer.answer = answer
+        else:
+            # Add new answer
+            quiz_answer = QuizAnswer(
+                user_id=user_id,
+                question_number=question_number,
+                answer=answer
+            )
+            session.add(quiz_answer)
+
         await session.commit()
 
     @staticmethod
@@ -205,16 +220,37 @@ class UserPhotoCRUD:
 
     @staticmethod
     async def add_photo(session: AsyncSession, user_id: int, file_id: str, file_path: str):
-        """Add user photo."""
-        photo = UserPhoto(
-            user_id=user_id,
-            file_id=file_id,
-            file_path=file_path
+        """Add or update user photo."""
+        # Check if photo already exists
+        result = await session.execute(
+            select(UserPhoto).where(UserPhoto.user_id == user_id)
         )
-        session.add(photo)
-        await session.commit()
-        await session.refresh(photo)
-        return photo
+        existing_photo = result.scalar_one_or_none()
+
+        if existing_photo:
+            # Update existing photo
+            await session.execute(
+                update(UserPhoto).where(UserPhoto.user_id == user_id).values(
+                    file_id=file_id,
+                    file_path=file_path,
+                    generated_path=None  # Reset generated path
+                )
+            )
+            await session.commit()
+            # Refresh to get updated data
+            await session.refresh(existing_photo)
+            return existing_photo
+        else:
+            # Create new photo
+            photo = UserPhoto(
+                user_id=user_id,
+                file_id=file_id,
+                file_path=file_path
+            )
+            session.add(photo)
+            await session.commit()
+            await session.refresh(photo)
+            return photo
 
     @staticmethod
     async def get_photo(session: AsyncSession, user_id: int) -> Optional[UserPhoto]:

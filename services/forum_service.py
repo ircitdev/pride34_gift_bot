@@ -93,14 +93,7 @@ class ForumService:
                     f"👉 <a href='{topic_link}'>Перейти к топику реферера</a>\n"
                 )
 
-            user_data_text += "\n<b>Ответы на квиз:</b>\n"
-
-            # Add quiz answers with full question and answer text
-            for i, answer_text in enumerate(quiz_answers, 1):
-                question_text = QUIZ_QUESTIONS[i]["text"]
-                user_data_text += f"\n<b>{question_text}</b>\n➜ {answer_text}\n"
-
-            # Send user avatar if available, otherwise send text only
+            # Send user avatar with basic info (without quiz answers to avoid caption length limit)
             if user_profile_photos.total_count > 0:
                 # User has avatar, send it with caption
                 avatar_file_id = user_profile_photos.photos[0][-1].file_id
@@ -117,6 +110,31 @@ class ForumService:
                     message_thread_id=topic_id,
                     text=user_data_text
                 )
+
+            # Send quiz answers in a separate message (max 5 answers)
+            quiz_answers_text = "<b>📝 Ответы на квиз:</b>\n"
+            logger.info(f"Processing {len(quiz_answers)} quiz answers for user {user_id}")
+
+            # Only process first 5 answers
+            answers_to_process = quiz_answers[:5]
+            for i, answer_text in enumerate(answers_to_process, 1):
+                try:
+                    if i in QUIZ_QUESTIONS:
+                        question_text = QUIZ_QUESTIONS[i]["text"]
+                        quiz_answers_text += f"\n<b>{question_text}</b>\n➜ {answer_text}\n"
+                    else:
+                        logger.warning(f"Question {i} not found in QUIZ_QUESTIONS")
+                        quiz_answers_text += f"\n<b>Вопрос {i}:</b>\n➜ {answer_text}\n"
+                except Exception as e:
+                    logger.error(f"Error processing answer {i}: {e}")
+                    quiz_answers_text += f"\n<b>Вопрос {i}:</b>\n➜ {answer_text}\n"
+
+            # Send quiz answers
+            await bot.send_message(
+                chat_id=settings.FORUM_GROUP_ID,
+                message_thread_id=topic_id,
+                text=quiz_answers_text
+            )
 
             # Send original user photo
             if user_photo_path.exists():
@@ -146,5 +164,5 @@ class ForumService:
             return topic_id
 
         except Exception as e:
-            logger.error(f"Error creating topic for user {user_id}: {e}")
+            logger.error(f"Error creating topic for user {user_id}: {e}", exc_info=True)
             return 0
